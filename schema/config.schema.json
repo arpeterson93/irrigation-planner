@@ -1,0 +1,170 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://arpeterson93.github.io/irrigation_planner/schema/config.schema.json",
+  "title": "Sprinkler Simulator config (schema v2)",
+  "description": "The v2 config shape owned by docs/js/state.js. All geometry is in yard feet with origin (0,0) at the BOTTOM-LEFT; the canvas layer flips y at render time only. See PLAN.md section 3.",
+  "type": "object",
+  "required": ["schemaVersion", "yard", "sprinklerZones", "heads"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": { "const": 2 },
+
+    "yard": {
+      "type": "object",
+      "required": ["widthFt", "heightFt"],
+      "additionalProperties": true,
+      "properties": {
+        "widthFt": { "type": "number", "exclusiveMinimum": 0 },
+        "heightFt": { "type": "number", "exclusiveMinimum": 0 },
+        "cellSizeFt": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "sprinklerZones": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "runTimeMin", "weeklyTargetIn", "schedule"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "supplyGpm": { "type": ["number", "null"] },
+          "runTimeMin": { "type": "number", "minimum": 0 },
+          "weeklyTargetIn": { "type": "number", "minimum": 0 },
+          "schedule": {
+            "type": "object",
+            "required": ["mode"],
+            "additionalProperties": true,
+            "properties": {
+              "mode": { "enum": ["every_day", "odd_even", "n_per_week"] },
+              "oddEvenChoice": { "enum": ["odd", "even"] },
+              "nPerWeek": { "type": "number", "minimum": 1, "maximum": 7 },
+              "daysOfWeek": {
+                "type": "array",
+                "items": { "type": "integer", "minimum": 0, "maximum": 6 }
+              }
+            },
+            "allOf": [
+              {
+                "if": { "properties": { "mode": { "const": "odd_even" } } },
+                "then": { "required": ["oddEvenChoice"] }
+              },
+              {
+                "if": { "properties": { "mode": { "const": "n_per_week" } } },
+                "then": { "required": ["nPerWeek"] }
+              }
+            ]
+          }
+        }
+      }
+    },
+
+    "yardZones": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "polygon"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "color": { "type": "string" },
+          "polygon": { "$ref": "#/$defs/polygon" }
+        }
+      }
+    },
+
+    "deadSpaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "polygon"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "kind": { "enum": ["house", "patio", "deck", "driveway", "pool", "bed", "other"] },
+          "polygon": { "$ref": "#/$defs/polygon" }
+        }
+      }
+    },
+
+    "heads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "sprinklerZoneId", "x", "y", "radiusFt", "arcStartDeg", "arcEndDeg", "ratedGpm"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string" },
+          "sprinklerZoneId": { "type": "string" },
+          "x": { "type": "number" },
+          "y": { "type": "number" },
+          "radiusFt": { "type": "number", "minimum": 0 },
+          "arcStartDeg": { "type": "number" },
+          "arcEndDeg": { "type": "number" },
+          "ratedGpm": { "type": "number", "minimum": 0 },
+          "type": { "enum": ["rotary", "fixed"] },
+          "nozzleFamily": { "type": "string" },
+          "brand": { "type": "string" },
+          "model": { "type": "string" },
+          "nozzle": { "type": "string" },
+          "riserHeightIn": { "type": ["number", "null"] },
+          "needsReplacement": { "type": "boolean" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+
+    "background": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "imageDataUrl": { "type": ["string", "null"] },
+        "scaleFtPerPx": { "type": ["number", "null"] },
+        "offsetXFt": { "type": "number" },
+        "offsetYFt": { "type": "number" },
+        "rotationDeg": { "type": "number" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+
+    "forecast": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "latitude": { "type": ["number", "null"] },
+        "longitude": { "type": ["number", "null"] },
+        "windowDays": { "type": "number", "minimum": 1, "maximum": 7 },
+        "efficiencyPct": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+
+    "sync": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "endpointUrl": { "type": ["string", "null"] },
+        "userKey": { "type": ["string", "null"] },
+        "lastSyncedAt": { "type": ["string", "null"] }
+      }
+    }
+  },
+
+  "$defs": {
+    "point": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "type": "number" }
+    },
+    "polygon": {
+      "type": "array",
+      "minItems": 3,
+      "items": { "$ref": "#/$defs/point" }
+    }
+  }
+}

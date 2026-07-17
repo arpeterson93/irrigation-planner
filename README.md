@@ -10,19 +10,24 @@ build plan this repo is being developed against.
 
 ## Current status
 
-This repo currently holds the Phase 0 scaffold:
+Phase 1 of `PLAN.md` is in place (modularization + schema v2 + migration):
 
 - `legacy/sprinkler-simulator.html` is the original, working single-file
   prototype, kept verbatim for reference.
-- `docs/index.html` is presently an exact copy of the legacy file, so the
-  site is live and functional the moment GitHub Pages is turned on.
-- `tests/` has a pytest suite that pins the coverage-math, forecast/ET0-math,
-  and schedule-math formulas to golden values that were cross-checked against
-  the original Google Sheet this project started as.
+- `docs/index.html` is now a markup-only shell that loads `docs/css/styles.css`
+  and the ES modules under `docs/js/` (`app`, `state`, `coverage`, `canvas`,
+  `forecast`, `schedule`, `usage`, `sync`). No build step; plain ES modules.
+- `docs/js/state.js` owns the **schema v2** data model and auto-migrates any
+  older v1 config on load, including the bottom-left coordinate-origin flip
+  (see `PLAN.md` section 3). `canvas.js` performs the render-time y-flip.
+- `schema/config.schema.json` is the JSON Schema for v2; `scripts/` has the
+  v1-config and Sheet-export migrators plus `validate_config.py`.
+- `tests/` pins the coverage/forecast/schedule math to golden values and
+  validates the v1->v2 migration output against the schema.
 
-Everything else in the folder structure (`docs/js/*`, `apps-script/`,
-`scripts/`, `schema/`) is scaffolding for the work described in `PLAN.md` and
-is not yet implemented.
+Canvas drag interactions (Phase 2), the effective-GPM/audit math (Phase 3),
+the day-by-day forecast table (Phase 4), and optional cloud sync (Phase 5,
+`apps-script/`) are not built yet.
 
 ## Running it locally
 

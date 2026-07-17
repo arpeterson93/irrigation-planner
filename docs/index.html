@@ -4,123 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sprinkler Simulator</title>
-<style>
-  :root{
-    --green-900:#0f3d24; --green-700:#1c6b41; --green-600:#238a53; --green-500:#2fa968;
-    --green-100:#e6f4ec; --blue-600:#1c6fa8; --blue-100:#e5f1fa;
-    --amber-500:#d98c1a; --red-600:#c0392b;
-    --ink-900:#1a2420; --ink-700:#3c4a44; --ink-500:#647169; --ink-300:#a3ada7; --ink-100:#e9ede9;
-    --paper:#fbfdfb; --card:#ffffff; --border:#dde5e0;
-    --shadow: 0 1px 2px rgba(15,61,36,.06), 0 4px 14px rgba(15,61,36,.06);
-    --radius: 12px;
-    font-size: 15px;
-  }
-  *{box-sizing:border-box;}
-  body{
-    margin:0; background:var(--paper); color:var(--ink-900);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  header{
-    background: linear-gradient(135deg, var(--green-900), var(--green-700));
-    color:#fff; padding:18px 24px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;
-  }
-  header .brand{display:flex; align-items:center; gap:10px;}
-  header .brand .logo{font-size:26px;}
-  header h1{font-size:19px; margin:0; font-weight:650; letter-spacing:.2px;}
-  header .sub{font-size:12.5px; color:#cfe7d9; margin-top:2px;}
-  .header-actions{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
-  .header-actions .save-status{font-size:12px; color:#cfe7d9; margin-right:6px;}
-  button{
-    font-family:inherit; cursor:pointer; border-radius:8px; border:1px solid transparent;
-    padding:8px 14px; font-size:13.5px; font-weight:600; transition:.15s;
-  }
-  .btn-primary{background:var(--green-500); color:#fff;}
-  .btn-primary:hover{background:var(--green-600);}
-  .btn-ghost{background:rgba(255,255,255,.12); color:#fff; border-color:rgba(255,255,255,.35);}
-  .btn-ghost:hover{background:rgba(255,255,255,.22);}
-  .btn-light{background:#fff; color:var(--green-700); border-color:var(--border);}
-  .btn-light:hover{background:var(--green-100);}
-  .btn-danger{background:#fff; color:var(--red-600); border-color:#f3c9c2;}
-  .btn-danger:hover{background:#fdecea;}
-  .btn-sm{padding:5px 10px; font-size:12px;}
-  input[type=file]{display:none;}
-
-  nav.tabs{
-    display:flex; gap:2px; background:var(--card); border-bottom:1px solid var(--border);
-    padding:0 20px; overflow-x:auto;
-  }
-  nav.tabs button{
-    background:none; border:none; border-radius:0; padding:13px 16px; font-size:13.5px;
-    color:var(--ink-500); font-weight:600; border-bottom:3px solid transparent; white-space:nowrap;
-  }
-  nav.tabs button.active{color:var(--green-700); border-bottom-color:var(--green-500);}
-  nav.tabs button:hover{color:var(--green-700);}
-
-  main{max-width:1280px; margin:0 auto; padding:22px 20px 60px;}
-  .tabpanel{display:none;}
-  .tabpanel.active{display:block;}
-
-  .grid{display:grid; gap:18px;}
-  .grid.cols-2{grid-template-columns: 1fr 1fr;}
-  .grid.cols-3{grid-template-columns: repeat(3, 1fr);}
-  @media (max-width: 980px){ .grid.cols-2, .grid.cols-3{grid-template-columns:1fr;} }
-
-  .card{
-    background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
-    box-shadow:var(--shadow); padding:18px 20px;
-  }
-  .card h2{font-size:15px; margin:0 0 4px; color:var(--ink-900);}
-  .card h3{font-size:13px; margin:0 0 10px; color:var(--ink-700); text-transform:uppercase; letter-spacing:.4px;}
-  .card .hint{font-size:12.5px; color:var(--ink-500); margin:0 0 14px; line-height:1.5;}
-
-  label{font-size:12.5px; font-weight:600; color:var(--ink-700); display:block; margin-bottom:4px;}
-  input[type=text], input[type=number], select{
-    width:100%; padding:7px 9px; border:1px solid var(--border); border-radius:7px;
-    font-size:13.5px; background:#fff; color:var(--ink-900);
-  }
-  input:focus, select:focus{outline:2px solid var(--green-500); outline-offset:1px;}
-  .field{margin-bottom:12px;}
-  .field-row{display:grid; grid-template-columns:repeat(auto-fit, minmax(110px,1fr)); gap:10px;}
-
-  table{width:100%; border-collapse:collapse; font-size:12.8px;}
-  th, td{padding:7px 8px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap;}
-  th{color:var(--ink-500); font-weight:650; font-size:11.5px; text-transform:uppercase; letter-spacing:.3px;}
-  td input, td select{padding:5px 6px; font-size:12.5px; min-width:56px;}
-  tr:hover td{background:var(--green-100);}
-  .table-wrap{overflow-x:auto; border:1px solid var(--border); border-radius:10px;}
-  .zone-swatch{display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:6px; vertical-align:-1px;}
-
-  canvas{display:block; width:100%; background:#fff; border-radius:10px; border:1px solid var(--border);}
-  .canvas-wrap{position:relative;}
-  .canvas-tip{
-    position:absolute; pointer-events:none; background:var(--ink-900); color:#fff; font-size:12px;
-    padding:6px 9px; border-radius:6px; transform:translate(-50%,-115%); white-space:nowrap; display:none; z-index:5;
-  }
-
-  .stat-row{display:flex; gap:14px; flex-wrap:wrap; margin-top:10px;}
-  .stat{background:var(--green-100); border-radius:10px; padding:10px 14px; min-width:100px;}
-  .stat .v{font-size:19px; font-weight:700; color:var(--green-800, var(--green-700));}
-  .stat .l{font-size:11px; color:var(--ink-500); text-transform:uppercase; letter-spacing:.3px;}
-  .stat.warn{background:#fdecea;}
-  .stat.warn .v{color:var(--red-600);}
-
-  .legend{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-500); margin-top:10px;}
-  .legend .bar{flex:1; height:10px; border-radius:5px; background:linear-gradient(90deg,#eef3f0 0%, #bfe3cf 20%, #2fa968 45%, #d98c1a 70%, #c0392b 100%);}
-
-  .toolbar{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:14px;}
-  .toolbar .field{margin-bottom:0; min-width:120px;}
-  .pill{display:inline-flex; align-items:center; gap:6px; background:var(--ink-100); border-radius:999px; padding:4px 10px; font-size:11.5px; font-weight:600; color:var(--ink-700);}
-
-  .divider{height:1px; background:var(--border); margin:16px 0;}
-  .muted{color:var(--ink-500);}
-  .badge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700;}
-  .badge.ok{background:#e3f5ea; color:var(--green-700);}
-  .badge.bad{background:#fdecea; color:var(--red-600);}
-  footer{text-align:center; padding:26px 20px 40px; font-size:12px; color:var(--ink-500);}
-  a{color:var(--blue-600);}
-  code{background:var(--ink-100); padding:1px 5px; border-radius:4px; font-size:11.8px;}
-  .empty{padding:26px; text-align:center; color:var(--ink-500); font-size:13px;}
-</style>
+<link rel="stylesheet" href="./css/styles.css">
 </head>
 <body>
 
@@ -152,44 +36,28 @@
 
   <!-- ===================== TAB: YARD & HEADS ===================== -->
   <section class="tabpanel active" id="tab-yard">
-    <div class="grid cols-2">
-      <div class="card">
-        <h2>Yard dimensions</h2>
-        <p class="hint">Set the bounding box of your yard in feet. Place heads using X/Y feet from the top-left corner. Keep it simple — you don't need to be exact, just consistent.</p>
-        <div class="field-row">
-          <div class="field"><label>Width (ft, X)</label><input type="number" id="yardWidth" min="5" max="1000" step="1"></div>
-          <div class="field"><label>Depth (ft, Y)</label><input type="number" id="yardHeight" min="5" max="1000" step="1"></div>
-          <div class="field"><label>Grid cell size (ft)</label><input type="number" id="cellSize" min="0.5" max="10" step="0.5"></div>
-        </div>
-        <div class="hint">Smaller cell size = more precise heatmap but slower to compute. 1–2 ft is usually a good balance.</div>
-      </div>
-
-      <div class="card">
-        <h2>Zones <span class="muted" style="font-weight:400;">(up to 6 controllable zones)</span></h2>
-        <p class="hint">Each zone runs all its heads together for the run time shown. Target is your desired watering depth per week for that zone (turf is commonly ~1–1.5&quot;/week).</p>
-        <div class="table-wrap">
-          <table id="zoneTable">
-            <thead><tr>
-              <th>Zone</th><th>Name</th><th>Run time (min)</th><th>Target (in/wk)</th><th>Available GPM</th>
-            </tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
+    <div class="card" style="margin-bottom:18px;">
+      <h2>Yard dimensions</h2>
+      <p class="hint">Set the bounding box of your yard in feet, then place heads using X/Y feet from the bottom-left corner. Keep it simple; you don't need to be exact, just consistent.</p>
+      <div class="inline-dims">
+        <div class="field"><label>Width (ft, X)</label><input type="number" id="yardWidth" min="5" max="1000" step="1"></div>
+        <div class="field"><label>Depth (ft, Y)</label><input type="number" id="yardHeight" min="5" max="1000" step="1"></div>
+        <div class="field"><label>Grid cell (ft)</label><input type="number" id="cellSize" min="0.5" max="10" step="0.5"></div>
+        <div class="hint" style="margin:0; align-self:center;">Smaller cell = more precise heatmap but slower. 1 to 2 ft is a good balance.</div>
       </div>
     </div>
 
-    <div class="grid cols-2" style="margin-top:18px;">
+    <div class="grid cols-2">
       <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <h2>Sprinkler heads</h2>
-          <button class="btn-primary btn-sm" id="btnAddHead">+ Add head</button>
+        <div class="zone-controls">
+          <h2 style="margin:0;">Zones <span class="muted" style="font-weight:400;">(up to 12 controllable zones)</span></h2>
+          <button class="btn-primary btn-sm" id="btnAddZone">+ Add zone</button>
         </div>
-        <p class="hint">Arc is a compass bearing sweep, clockwise from North (0°). A head spraying the full circle should be Start <code>0</code>, End <code>360</code>. A head spraying only the NE corner (North to East) would be Start <code>0</code>, End <code>90</code>.</p>
-        <div class="table-wrap" id="headsTableWrap">
-          <table id="headsTable">
+        <p class="hint">Each zone runs all its heads together for the run time shown. Target is your desired watering depth per week for that zone (turf is commonly ~1 to 1.5&quot;/week).</p>
+        <div class="table-wrap">
+          <table id="zoneTable">
             <thead><tr>
-              <th></th><th>ID</th><th>Zone</th><th>X (ft)</th><th>Y (ft)</th><th>Radius (ft)</th>
-              <th>Arc start°</th><th>Arc end°</th><th>GPM</th><th>Notes</th><th></th>
+              <th>Zone</th><th>Name</th><th>Run time (min)</th><th>Target (in/wk)</th><th>Available GPM</th><th></th>
             </tr></thead>
             <tbody></tbody>
           </table>
@@ -198,7 +66,7 @@
 
       <div class="card">
         <h2>Yard preview</h2>
-        <p class="hint">Colored wedges show each head's spray pattern. Click a head row to highlight it here.</p>
+        <p class="hint">Colored wedges show each head's spray pattern. Click a head row to highlight it here. Heads flagged "needs replacement" get an amber ring.</p>
         <div class="canvas-wrap">
           <canvas id="yardCanvas" height="480"></canvas>
           <div class="canvas-tip" id="yardTip"></div>
@@ -211,6 +79,27 @@
             <input type="checkbox" id="toggleRadius" checked style="width:auto;"> Show full radius circle
           </label>
         </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>Sprinkler heads</h2>
+        <button class="btn-primary btn-sm" id="btnAddHead">+ Add head</button>
+      </div>
+      <p class="hint">Arc is a compass bearing sweep, clockwise from North (0°). A head spraying the full circle should be Start <code>0</code>, End <code>360</code>. A head spraying only the NE corner (North to East) would be Start <code>0</code>, End <code>90</code>.</p>
+      <div class="hint" id="headTypeNudge" style="display:none; color:var(--amber-500); font-weight:600;">
+        Some heads don't have a type set yet. Set each head to rotary or fixed; it drives the coverage warnings.
+      </div>
+      <div class="table-wrap" id="headsTableWrap">
+        <table id="headsTable">
+          <thead><tr>
+            <th></th><th>ID</th><th>Zone</th><th>X (ft)</th><th>Y (ft)</th><th>Radius (ft)</th>
+            <th>Arc start°</th><th>Arc end°</th><th>GPM</th>
+            <th>Type</th><th>Nozzle family</th><th>Brand</th><th>Model</th><th>Nozzle</th><th>Riser (in)</th><th>Replace?</th><th>Notes</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -230,7 +119,7 @@
         <button class="btn-primary" id="btnRecompute">Recompute coverage</button>
         <span class="pill" id="computeTime"></span>
       </div>
-      <p class="hint" style="margin-bottom:0;">Depth shown is inches of water applied per cycle (one run through the zone(s) selected, at their configured run time). Multiply by cycles/week for a weekly total — shown in the summary below.</p>
+      <p class="hint" style="margin-bottom:0;">Depth shown is inches of water applied per cycle (one run through the zone(s) selected, at their configured run time). Multiply by cycles/week for a weekly total, shown in the summary below.</p>
     </div>
 
     <div class="grid cols-2">
@@ -243,6 +132,7 @@
         <div class="legend">
           <span>Dry</span><div class="bar"></div><span>Heavy</span>
         </div>
+        <p class="hint" style="margin-top:10px; margin-bottom:0;">Models the average precipitation rate across each head's wetted sector, not a measured distribution. Treat it as a coverage comparison, not a catch-can audit.</p>
       </div>
 
       <div class="card">
@@ -265,7 +155,7 @@
     <div class="grid cols-2">
       <div class="card">
         <h2>Location</h2>
-        <p class="hint">Pulls a live rainfall forecast from the National Weather Service (api.weather.gov — free, no key required) and estimates reference evapotranspiration (ET₀) from the forecasted high/low temperatures at your latitude.</p>
+        <p class="hint">Pulls a live rainfall forecast from the National Weather Service (api.weather.gov, free, no key required) and estimates reference evapotranspiration (ET₀) from the forecasted high/low temperatures at your latitude.</p>
         <div class="field-row">
           <div class="field"><label>Latitude</label><input type="text" id="lat" placeholder="e.g. 39.7456"></div>
           <div class="field"><label>Longitude</label><input type="text" id="lon" placeholder="e.g. -97.0892"></div>
@@ -276,7 +166,7 @@
           <div class="field"><label>Rain window</label>
             <select id="rainWindow"><option value="24">Next 24 hrs</option><option value="48" selected>Next 48 hrs</option><option value="72">Next 72 hrs</option></select>
           </div>
-          <div class="field"><label>Runoff / uptake efficiency</label><input type="number" id="runoffEff" min="0.1" max="1" step="0.05" value="0.8"></div>
+          <div class="field"><label>Runoff / uptake efficiency (%)</label><input type="number" id="runoffEff" min="10" max="100" step="5" value="80"></div>
         </div>
         <button class="btn-primary" id="btnFetchForecast">Fetch forecast</button>
         <span class="pill" id="forecastStatus" style="display:none;"></span>
@@ -284,19 +174,19 @@
 
       <div class="card">
         <h2>Adjustment inputs</h2>
-        <p class="hint">Baseline is the "100%" daily watering need for your area at peak season — used to scale the % adjustment. Default is derived from your zone targets, but override it if you have a better local reference (e.g. a CIMIS/ET station).</p>
+        <p class="hint">Baseline is the "100%" daily watering need for your area at peak season, used to scale the % adjustment. Default is derived from your zone targets, but override it if you have a better local reference (e.g. a CIMIS/ET station).</p>
         <div class="field-row">
           <div class="field"><label>Watering days / week</label><input type="number" id="wateringDays" min="1" max="7" step="1" value="3"></div>
           <div class="field"><label>Baseline daily need (in)</label><input type="number" id="baselineDaily" min="0.01" max="2" step="0.01"></div>
         </div>
         <div class="field">
-          <label>ET₀ override (in) <span class="muted" style="font-weight:400;">— leave blank to use the Hargreaves estimate below</span></label>
+          <label>ET₀ override (in) <span class="muted" style="font-weight:400;">(leave blank to use the Hargreaves estimate)</span></label>
           <input type="number" id="etOverride" min="0" max="1" step="0.01" placeholder="auto">
         </div>
       </div>
     </div>
 
-    <div class="card" style="margin-top:18px;" id="forecastResultCard" style="display:none;">
+    <div class="card" style="margin-top:18px;" id="forecastResultCard">
       <h2>Result</h2>
       <div id="forecastEmpty" class="empty">Fetch a forecast to see today's suggested adjustment.</div>
       <div id="forecastResult" style="display:none;">
@@ -321,792 +211,20 @@
       <h3 style="margin-top:16px;">Precipitation rate</h3>
       <p class="hint">Each head's precipitation rate is <code>96.3 × GPM ÷ coverage area (sq ft)</code>, giving inches/hour. Coverage area is a circular sector: <code>π × radius² × (arc span ÷ 360)</code>. This is the standard irrigation-industry formula and is what the rest of the math is built on.</p>
       <h3>Heatmap</h3>
-      <p class="hint">For every grid cell, we check which heads reach it (distance ≤ radius, and bearing to the cell falls within the head's arc). Each contributing head adds its precipitation rate; multiplying by that head's zone run time gives inches applied in one cycle. A cell's total is the sum across all zones' single cycle.</p>
+      <p class="hint">For every grid cell, we check which heads reach it (distance ≤ radius, and bearing to the cell falls within the head's arc). Each contributing head adds its precipitation rate; multiplying by that head's zone run time gives inches applied in one cycle. A cell's total is the sum across all zones' single cycle. Depth is modeled as uniform across each head's sector, an average rate rather than a measured distribution curve.</p>
       <h3>Forecast ET₀ estimate</h3>
-      <p class="hint">Reference evapotranspiration is estimated with the Hargreaves-Samani equation using your latitude and the NWS-forecasted daily high/low temperature — a widely used simplified method when a dedicated ET station isn't available. It's an estimate, not a substitute for a local CIMIS/AgriMet reading if you have access to one — use the override field if so.</p>
+      <p class="hint">Reference evapotranspiration is estimated with the Hargreaves-Samani equation using your latitude and the NWS-forecasted daily high/low temperature, a widely used simplified method when a dedicated ET station isn't available. It's an estimate, not a substitute for a local CIMIS/AgriMet reading if you have access to one; use the override field if so.</p>
       <h3>Seasonal adjustment</h3>
-      <p class="hint">Net water need = ET₀ − (forecasted rain × runoff efficiency). Adjustment % = net need ÷ baseline daily need. Each zone's suggested run time = its configured run time × adjustment % (clamped 0–150%).</p>
+      <p class="hint">Net water need = ET₀ minus (forecasted rain × runoff efficiency). Adjustment % = net need ÷ baseline daily need. Each zone's suggested run time = its configured run time × adjustment % (clamped 0 to 150%).</p>
       <h3>Your data</h3>
-      <p class="hint">Everything you enter is saved automatically in this browser (localStorage) — nothing is sent anywhere except the two anonymous, keyless calls to the public NWS API when you fetch a forecast. Use <b>Export JSON</b> any time to back up or move your yard to another device, and <b>Import JSON</b> to restore it.</p>
+      <p class="hint">Everything you enter is saved automatically in this browser (localStorage); nothing is sent anywhere except the two anonymous, keyless calls to the public NWS API when you fetch a forecast. Use <b>Export JSON</b> any time to back up or move your yard to another device, and <b>Import JSON</b> to restore it.</p>
     </div>
   </section>
 
 </main>
 
-<footer>Sprinkler Simulator — a hobbyist irrigation coverage &amp; seasonal-adjustment tool. Not a substitute for a professional irrigation audit.</footer>
+<footer>Sprinkler Simulator: a hobbyist irrigation coverage and seasonal-adjustment tool. Not a substitute for a professional irrigation audit.</footer>
 
-<script>
-(function(){
-"use strict";
-
-/* ============================= STATE ============================= */
-
-const ZONE_COLORS = ["#2fa968","#1c6fa8","#d98c1a","#8e44ad","#c0392b","#16a085"];
-const STORAGE_KEY = "sprinklerSimState_v1";
-
-function defaultState(){
-  return {
-    yard: { width: 80, height: 60, cellSize: 2 },
-    zones: [1,2,3,4,5,6].map(i => ({
-      id:i, name:"Zone "+i, runMin: 20, targetIn: 1.0, gpmAvail: 10
-    })),
-    heads: [],
-    forecast: { lat:"", lon:"", rainWindow:48, runoffEff:0.8, wateringDays:3, baselineDaily:null, etOverride:null }
-  };
-}
-
-let state = loadState() || defaultState();
-let selectedHeadId = null;
-let lastHeatData = null;
-let saveTimer = null;
-
-/* ============================= PERSISTENCE ============================= */
-
-function loadState(){
-  try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if(!raw) return null;
-    const parsed = JSON.parse(raw);
-    if(!parsed.yard || !parsed.zones || !parsed.heads) return null;
-    return parsed;
-  }catch(e){ console.warn("Failed to load saved state", e); return null; }
-}
-
-function saveState(immediate){
-  const status = document.getElementById("saveStatus");
-  if(status) status.textContent = "Saving…";
-  clearTimeout(saveTimer);
-  const doSave = () => {
-    try{
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      if(status) status.textContent = "Saved " + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-    }catch(e){
-      if(status) status.textContent = "Save failed (storage full?)";
-      console.error(e);
-    }
-  };
-  if(immediate) doSave(); else saveTimer = setTimeout(doSave, 400);
-}
-
-function exportJSON(){
-  const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  const stamp = new Date().toISOString().slice(0,10);
-  a.href = url; a.download = `sprinkler-simulator-${stamp}.json`;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function importJSONFile(file){
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    try{
-      const parsed = JSON.parse(e.target.result);
-      if(!parsed.yard || !parsed.zones || !parsed.heads) throw new Error("Missing expected fields");
-      state = parsed;
-      saveState(true);
-      renderAll();
-    }catch(err){
-      alert("Couldn't read that file as a Sprinkler Simulator project: " + err.message);
-    }
-  };
-  reader.readAsText(file);
-}
-
-/* ============================= HELPERS ============================= */
-
-function uid(prefix){ return prefix + Math.random().toString(36).slice(2,7); }
-function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-function norm360(a){ return ((a % 360) + 360) % 360; }
-function fmt(n, d){ if(n===null||n===undefined||isNaN(n)) return "–"; return Number(n).toFixed(d===undefined?2:d); }
-
-function arcSpan(start, end){
-  start = norm360(start); end = norm360(end);
-  if(start === end) return 360;
-  return norm360(end - start);
-}
-
-function angleInArc(angle, start, end){
-  angle = norm360(angle); start = norm360(start); end = norm360(end);
-  if(start === end) return true;
-  if(start < end) return angle >= start - 1e-9 && angle <= end + 1e-9;
-  return angle >= start - 1e-9 || angle <= end + 1e-9;
-}
-
-function headArea(head){
-  const span = arcSpan(head.arcStart, head.arcEnd);
-  return Math.PI * head.radius * head.radius * (span/360);
-}
-
-// precipitation rate for a head, in/hr
-function headPrecipRate(head){
-  const area = headArea(head);
-  if(area <= 0) return 0;
-  return 96.3 * head.gpm / area;
-}
-
-function zoneById(id){ return state.zones.find(z => z.id === id); }
-function zoneColor(id){ return ZONE_COLORS[(id-1) % ZONE_COLORS.length]; }
-
-/* ============================= TABS ============================= */
-
-document.querySelectorAll("nav.tabs button").forEach(btn=>{
-  btn.addEventListener("click", ()=>{
-    document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.remove("active"));
-    document.querySelectorAll(".tabpanel").forEach(p=>p.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById("tab-"+btn.dataset.tab).classList.add("active");
-    if(btn.dataset.tab === "yard") drawYardCanvas();
-    if(btn.dataset.tab === "coverage" && lastHeatData) drawHeatmap(lastHeatData);
-  });
-});
-
-/* ============================= YARD & ZONES FORM ============================= */
-
-function bindYardForm(){
-  const w = document.getElementById("yardWidth");
-  const h = document.getElementById("yardHeight");
-  const c = document.getElementById("cellSize");
-  w.value = state.yard.width; h.value = state.yard.height; c.value = state.yard.cellSize;
-  w.addEventListener("change", ()=>{ state.yard.width = clamp(+w.value||80,5,1000); w.value=state.yard.width; saveState(); drawYardCanvas(); });
-  h.addEventListener("change", ()=>{ state.yard.height = clamp(+h.value||60,5,1000); h.value=state.yard.height; saveState(); drawYardCanvas(); });
-  c.addEventListener("change", ()=>{ state.yard.cellSize = clamp(+c.value||2,0.5,10); c.value=state.yard.cellSize; saveState(); });
-}
-
-function renderZoneTable(){
-  const tbody = document.querySelector("#zoneTable tbody");
-  tbody.innerHTML = "";
-  state.zones.forEach(z=>{
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><span class="zone-swatch" style="background:${zoneColor(z.id)}"></span>Zone ${z.id}</td>
-      <td><input type="text" data-f="name" value="${escapeHtml(z.name)}" style="min-width:100px;"></td>
-      <td><input type="number" data-f="runMin" value="${z.runMin}" min="0" max="180" step="1" style="width:70px;"></td>
-      <td><input type="number" data-f="targetIn" value="${z.targetIn}" min="0" max="10" step="0.1" style="width:70px;"></td>
-      <td><input type="number" data-f="gpmAvail" value="${z.gpmAvail}" min="0" max="100" step="0.5" style="width:70px;"></td>
-    `;
-    tr.querySelectorAll("input").forEach(inp=>{
-      inp.addEventListener("change", ()=>{
-        const f = inp.dataset.f;
-        z[f] = (f==="name") ? inp.value : (+inp.value || 0);
-        saveState();
-        renderAll();
-      });
-    });
-    tbody.appendChild(tr);
-  });
-  // populate coverage zone filter
-  const sel = document.getElementById("coverageZoneFilter");
-  const cur = sel.value;
-  sel.innerHTML = `<option value="all">All zones (one full cycle)</option>` +
-    state.zones.map(z=>`<option value="${z.id}">Zone ${z.id} only — ${escapeHtml(z.name)}</option>`).join("");
-  sel.value = cur || "all";
-}
-
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
-
-/* ============================= HEADS TABLE ============================= */
-
-function addHead(defaults){
-  const h = Object.assign({
-    id: uid("H"), zone: 1, x: Math.round(state.yard.width/2), y: Math.round(state.yard.height/2),
-    radius: 15, arcStart: 0, arcEnd: 360, gpm: 2.0, notes: ""
-  }, defaults||{});
-  state.heads.push(h);
-  saveState();
-  renderHeadsTable();
-  drawYardCanvas();
-}
-
-function renderHeadsTable(){
-  const tbody = document.querySelector("#headsTable tbody");
-  tbody.innerHTML = "";
-  if(state.heads.length === 0){
-    tbody.innerHTML = `<tr><td colspan="11" class="empty">No heads yet — click "+ Add head" to start mapping your yard.</td></tr>`;
-    return;
-  }
-  state.heads.forEach(h=>{
-    const tr = document.createElement("tr");
-    tr.dataset.id = h.id;
-    if(h.id === selectedHeadId) tr.style.background = "var(--green-100)";
-    const zoneOpts = state.zones.map(z=>`<option value="${z.id}" ${z.id===h.zone?"selected":""}>${z.id}</option>`).join("");
-    tr.innerHTML = `
-      <td><span class="zone-swatch" style="background:${zoneColor(h.zone)}"></span></td>
-      <td><input type="text" data-f="id" value="${escapeHtml(h.id)}" style="width:60px;"></td>
-      <td><select data-f="zone">${zoneOpts}</select></td>
-      <td><input type="number" data-f="x" value="${h.x}" step="0.5" style="width:60px;"></td>
-      <td><input type="number" data-f="y" value="${h.y}" step="0.5" style="width:60px;"></td>
-      <td><input type="number" data-f="radius" value="${h.radius}" step="0.5" min="0" style="width:60px;"></td>
-      <td><input type="number" data-f="arcStart" value="${h.arcStart}" step="5" min="0" max="360" style="width:60px;"></td>
-      <td><input type="number" data-f="arcEnd" value="${h.arcEnd}" step="5" min="0" max="360" style="width:60px;"></td>
-      <td><input type="number" data-f="gpm" value="${h.gpm}" step="0.1" min="0" style="width:60px;"></td>
-      <td><input type="text" data-f="notes" value="${escapeHtml(h.notes||"")}" style="width:90px;" placeholder="e.g. rotor, brand"></td>
-      <td><button class="btn-danger btn-sm" data-act="del">✕</button></td>
-    `;
-    tr.addEventListener("click", (e)=>{
-      if(e.target.tagName === "INPUT" || e.target.tagName === "BUTTON" || e.target.tagName==="SELECT") return;
-      selectedHeadId = h.id; renderHeadsTable(); drawYardCanvas();
-    });
-    tr.querySelectorAll("input,select").forEach(inp=>{
-      inp.addEventListener("change", ()=>{
-        const f = inp.dataset.f;
-        if(f === "id" || f === "notes"){ h[f] = inp.value; }
-        else if(f === "zone"){ h.zone = +inp.value; }
-        else { h[f] = +inp.value || 0; }
-        saveState();
-        drawYardCanvas();
-      });
-      inp.addEventListener("focus", ()=>{ selectedHeadId = h.id; drawYardCanvas(); });
-    });
-    tr.querySelector('[data-act="del"]').addEventListener("click", ()=>{
-      state.heads = state.heads.filter(x=>x.id !== h.id);
-      saveState(); renderHeadsTable(); drawYardCanvas();
-    });
-    tbody.appendChild(tr);
-  });
-}
-
-document.getElementById("btnAddHead").addEventListener("click", ()=>{
-  const n = state.heads.length + 1;
-  addHead({ id: uid("H") });
-});
-
-/* ============================= YARD CANVAS ============================= */
-
-function canvasScale(canvas){
-  const w = state.yard.width, h = state.yard.height;
-  const availW = canvas.clientWidth || canvas.width;
-  const availH = canvas.height;
-  const scale = Math.min((availW-20)/w, (availH-20)/h);
-  const offX = (availW - w*scale)/2;
-  const offY = (availH - h*scale)/2;
-  return {scale, offX, offY};
-}
-
-function drawYardCanvas(){
-  const canvas = document.getElementById("yardCanvas");
-  if(!canvas.offsetParent) return; // hidden tab
-  canvas.width = canvas.clientWidth;
-  const ctx = canvas.getContext("2d");
-  const {scale, offX, offY} = canvasScale(canvas);
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  const toPx = (x,y) => [offX + x*scale, offY + y*scale];
-
-  // yard boundary
-  const [bx0,by0] = toPx(0,0), [bx1,by1] = toPx(state.yard.width, state.yard.height);
-  ctx.fillStyle = "#f4faf6";
-  ctx.fillRect(bx0,by0, bx1-bx0, by1-by0);
-  ctx.strokeStyle = "#8fb8a0"; ctx.lineWidth = 1.5;
-  ctx.strokeRect(bx0,by0, bx1-bx0, by1-by0);
-
-  // grid
-  if(document.getElementById("toggleGrid").checked){
-    ctx.strokeStyle = "rgba(140,170,150,.25)"; ctx.lineWidth = 1;
-    const step = 10;
-    for(let x=0; x<=state.yard.width; x+=step){
-      const [px0,py0] = toPx(x,0), [px1,py1] = toPx(x,state.yard.height);
-      ctx.beginPath(); ctx.moveTo(px0,py0); ctx.lineTo(px1,py1); ctx.stroke();
-    }
-    for(let y=0; y<=state.yard.height; y+=step){
-      const [px0,py0] = toPx(0,y), [px1,py1] = toPx(state.yard.width,y);
-      ctx.beginPath(); ctx.moveTo(px0,py0); ctx.lineTo(px1,py1); ctx.stroke();
-    }
-  }
-
-  const showRadius = document.getElementById("toggleRadius").checked;
-
-  state.heads.forEach(h=>{
-    const [hx,hy] = toPx(h.x,h.y);
-    const r = h.radius*scale;
-    const color = zoneColor(h.zone);
-    const isSel = h.id === selectedHeadId;
-
-    // full radius circle (faint)
-    if(showRadius){
-      ctx.beginPath(); ctx.arc(hx,hy,r,0,Math.PI*2);
-      ctx.strokeStyle = color; ctx.globalAlpha = 0.25; ctx.lineWidth = 1;
-      ctx.stroke(); ctx.globalAlpha = 1;
-    }
-
-    // arc wedge (bearing 0=N, clockwise -> canvas angle = bearing - 90)
-    const startCanvas = (h.arcStart - 90) * Math.PI/180;
-    const span = arcSpan(h.arcStart, h.arcEnd);
-    const endCanvas = ((h.arcStart + span) - 90) * Math.PI/180;
-    ctx.beginPath();
-    ctx.moveTo(hx,hy);
-    ctx.arc(hx,hy,r, startCanvas, endCanvas, false);
-    ctx.closePath();
-    ctx.fillStyle = color; ctx.globalAlpha = isSel ? 0.42 : 0.22;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    // head marker
-    ctx.beginPath(); ctx.arc(hx,hy, isSel?6:4, 0, Math.PI*2);
-    ctx.fillStyle = isSel ? "#1a2420" : color;
-    ctx.fill();
-    if(isSel){ ctx.lineWidth=2; ctx.strokeStyle="#fff"; ctx.stroke(); }
-
-    // label
-    ctx.fillStyle = "#1a2420"; ctx.font = "11px sans-serif";
-    ctx.fillText(h.id, hx+7, hy-7);
-  });
-
-  canvas._toPx = toPx;
-  canvas._scale = scale;
-}
-
-// hover tooltip on yard canvas
-(function(){
-  const canvas = document.getElementById("yardCanvas");
-  const tip = document.getElementById("yardTip");
-  canvas.addEventListener("mousemove", (e)=>{
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    let hit = null;
-    for(const h of state.heads){
-      const [hx,hy] = canvas._toPx ? canvas._toPx(h.x,h.y) : [0,0];
-      if(Math.hypot(mx-hx,my-hy) < 8){ hit = h; break; }
-    }
-    if(hit){
-      tip.style.display = "block";
-      tip.style.left = mx+"px"; tip.style.top = my+"px";
-      tip.textContent = `${hit.id} · Zone ${hit.zone} · ${hit.gpm} GPM · r=${hit.radius}ft · ${fmt(headPrecipRate(hit),2)} in/hr`;
-    } else { tip.style.display = "none"; }
-  });
-  canvas.addEventListener("mouseleave", ()=> tip.style.display="none");
-})();
-
-window.addEventListener("resize", ()=>{ drawYardCanvas(); if(lastHeatData) drawHeatmap(lastHeatData); });
-
-/* ============================= COVERAGE / HEATMAP ============================= */
-
-function computeCoverage(){
-  const t0 = performance.now();
-  const cell = state.yard.cellSize;
-  const cols = Math.max(1, Math.round(state.yard.width/cell));
-  const rows = Math.max(1, Math.round(state.yard.height/cell));
-
-  // grid[row][col] = total inches per cycle (all zones)
-  const grid = Array.from({length:rows}, ()=> new Array(cols).fill(0));
-  // per-zone grid too, for summary stats & single-zone view
-  const zoneGrids = {};
-  state.zones.forEach(z => zoneGrids[z.id] = Array.from({length:rows}, ()=> new Array(cols).fill(0)));
-
-  // pre-compute head rate + area once
-  const headMeta = state.heads.map(h => ({ h, rate: headPrecipRate(h) }));
-
-  for(let r=0; r<rows; r++){
-    const cy = (r+0.5)*cell;
-    for(let c=0; c<cols; c++){
-      const cx = (c+0.5)*cell;
-      for(const {h, rate} of headMeta){
-        if(rate <= 0) continue;
-        const dx = cx - h.x, dy = cy - h.y;
-        const dist = Math.hypot(dx,dy);
-        if(dist > h.radius) continue;
-        const bearing = norm360(Math.atan2(dx, -dy) * 180/Math.PI);
-        if(!angleInArc(bearing, h.arcStart, h.arcEnd)) continue;
-        const z = zoneById(h.zone);
-        const inchesThisCycle = rate * ((z ? z.runMin : 0)/60);
-        zoneGrids[h.zone][r][c] += inchesThisCycle;
-        grid[r][c] += inchesThisCycle;
-      }
-    }
-  }
-
-  const t1 = performance.now();
-  return { rows, cols, cell, grid, zoneGrids, ms: t1-t0 };
-}
-
-function statsFromGrid(gridArr, cellArea, cyclesPerWeek){
-  let vals = [];
-  for(const row of gridArr) for(const v of row) if(v > 1e-6) vals.push(v);
-  if(vals.length === 0) return { min:0, med:0, max:0, avg:0, sqft:0, avgWeekly:0 };
-  vals.sort((a,b)=>a-b);
-  const min = vals[0], max = vals[vals.length-1];
-  const med = vals[Math.floor(vals.length/2)];
-  const avg = vals.reduce((a,b)=>a+b,0)/vals.length;
-  return { min, med, max, avg, sqft: vals.length*cellArea, avgWeekly: avg*cyclesPerWeek };
-}
-
-function recomputeAndRender(){
-  lastHeatData = computeCoverage();
-  document.getElementById("computeTime").textContent = `computed in ${fmt(lastHeatData.ms,0)}ms`;
-  drawHeatmap(lastHeatData);
-  renderZoneSummary(lastHeatData);
-}
-
-function colorForValue(v, maxRef){
-  // 0 -> pale, ~target -> green, 2x -> amber, 3x+ -> red
-  if(v <= 0) return "rgba(200,210,204,0.25)";
-  const t = clamp(v/maxRef, 0, 1.6);
-  if(t <= 0.5){
-    const k = t/0.5; return lerpColor([233,243,238], [47,169,104], k);
-  } else if(t <= 1){
-    const k = (t-0.5)/0.5; return lerpColor([47,169,104],[217,140,26], k);
-  } else {
-    const k = clamp((t-1)/0.6,0,1); return lerpColor([217,140,26],[192,57,43], k);
-  }
-}
-function lerpColor(a,b,k){
-  const r = Math.round(a[0]+(b[0]-a[0])*k), g = Math.round(a[1]+(b[1]-a[1])*k), bl = Math.round(a[2]+(b[2]-a[2])*k);
-  return `rgb(${r},${g},${bl})`;
-}
-
-function drawHeatmap(data){
-  const canvas = document.getElementById("heatCanvas");
-  if(!canvas.offsetParent) return;
-  canvas.width = canvas.clientWidth;
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  const filter = document.getElementById("coverageZoneFilter").value;
-  const grid = filter === "all" ? data.grid : data.zoneGrids[+filter];
-
-  const {scale, offX, offY} = canvasScale(canvas);
-  const cellPx = data.cell*scale;
-
-  // reference for color scale: median target across zones (fallback 1.0)
-  const targets = state.zones.filter(z=>z.targetIn>0).map(z=>z.targetIn);
-  const targetRef = targets.length ? targets.reduce((a,b)=>a+b,0)/targets.length : 1.0;
-  const cyclesPerWeek = +document.getElementById("cyclesPerWeek").value || 1;
-  const maxRef = targetRef; // color scale centers on weekly target / cycles implicitly via per-cycle value
-
-  for(let r=0; r<data.rows; r++){
-    for(let c=0; c<data.cols; c++){
-      const v = grid[r][c];
-      const x = offX + c*cellPx, y = offY + r*cellPx;
-      ctx.fillStyle = colorForValue(v, maxRef/Math.max(cyclesPerWeek,1)*cyclesPerWeek === maxRef ? maxRef : maxRef); // per-cycle compare to per-cycle target-equivalent
-      ctx.fillStyle = colorForValue(v, targetRef/cyclesPerWeek || 0.3);
-      ctx.fillRect(x,y,cellPx+0.5,cellPx+0.5);
-    }
-  }
-
-  // yard outline
-  ctx.strokeStyle = "#8fb8a0"; ctx.lineWidth = 1.5;
-  ctx.strokeRect(offX,offY, data.cols*cellPx, data.rows*cellPx);
-
-  canvas._grid = grid; canvas._offX = offX; canvas._offY = offY; canvas._cellPx = cellPx; canvas._data = data;
-}
-
-(function(){
-  const canvas = document.getElementById("heatCanvas");
-  const tip = document.getElementById("heatTip");
-  canvas.addEventListener("mousemove", (e)=>{
-    if(!canvas._grid) return;
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    const c = Math.floor((mx - canvas._offX)/canvas._cellPx);
-    const r = Math.floor((my - canvas._offY)/canvas._cellPx);
-    if(r<0||c<0||r>=canvas._data.rows||c>=canvas._data.cols){ tip.style.display="none"; return; }
-    const v = canvas._grid[r][c];
-    tip.style.display = "block";
-    tip.style.left = mx+"px"; tip.style.top = my+"px";
-    tip.textContent = `${fmt(v,3)} in this cycle`;
-  });
-  canvas.addEventListener("mouseleave", ()=> tip.style.display="none");
-})();
-
-function renderZoneSummary(data){
-  const tbody = document.querySelector("#zoneSummaryTable tbody");
-  tbody.innerHTML = "";
-  const cyclesPerWeek = +document.getElementById("cyclesPerWeek").value || 1;
-  const cellArea = data.cell*data.cell;
-  let totalGpm = 0, anyOver = false;
-
-  state.zones.forEach(z=>{
-    const heads = state.heads.filter(h=>h.zone===z.id);
-    const gpm = heads.reduce((s,h)=>s+(+h.gpm||0),0);
-    totalGpm = Math.max(totalGpm, gpm);
-    const st = statsFromGrid(data.zoneGrids[z.id], cellArea, cyclesPerWeek);
-    const over = z.gpmAvail>0 && gpm > z.gpmAvail;
-    if(over) anyOver = true;
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><span class="zone-swatch" style="background:${zoneColor(z.id)}"></span>${escapeHtml(z.name)}</td>
-      <td>${heads.length}</td>
-      <td>${fmt(gpm,2)} ${over?`<span class="badge bad" title="Exceeds available GPM">over</span>`:""}</td>
-      <td>${fmt(st.min,2)}</td>
-      <td>${fmt(st.med,2)}</td>
-      <td>${fmt(st.max,2)}</td>
-      <td>${fmt(st.avgWeekly,2)} <span class="muted">/ target ${fmt(z.targetIn,2)}</span></td>
-      <td>${st.avg>0 ? `<span class="badge ${Math.abs(st.avgWeekly-z.targetIn) <= z.targetIn*0.25 ? 'ok':'bad'}">${st.avgWeekly>=z.targetIn?'on/over':'under'}</span>` : "–"}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  const totalHeads = state.heads.length;
-  const coveredCells = data.grid.flat().filter(v=>v>1e-6).length;
-  const sqftCovered = coveredCells * cellArea;
-  document.getElementById("systemStats").innerHTML = `
-    <div class="stat"><div class="v">${totalHeads}</div><div class="l">Total heads</div></div>
-    <div class="stat"><div class="v">${fmt(sqftCovered,0)}</div><div class="l">Sq ft covered</div></div>
-    <div class="stat ${anyOver?'warn':''}"><div class="v">${fmt(totalGpm,1)}</div><div class="l">Peak zone GPM</div></div>
-  `;
-}
-
-document.getElementById("btnRecompute").addEventListener("click", recomputeAndRender);
-document.getElementById("coverageZoneFilter").addEventListener("change", ()=>{ if(lastHeatData) drawHeatmap(lastHeatData); });
-document.getElementById("cyclesPerWeek").addEventListener("change", ()=>{ if(lastHeatData) renderZoneSummary(lastHeatData); });
-
-/* ============================= FORECAST ============================= */
-
-function bindForecastForm(){
-  document.getElementById("lat").value = state.forecast.lat || "";
-  document.getElementById("lon").value = state.forecast.lon || "";
-  document.getElementById("rainWindow").value = state.forecast.rainWindow || 48;
-  document.getElementById("runoffEff").value = state.forecast.runoffEff ?? 0.8;
-  document.getElementById("wateringDays").value = state.forecast.wateringDays || 3;
-  document.getElementById("etOverride").value = state.forecast.etOverride ?? "";
-  document.getElementById("baselineDaily").value = state.forecast.baselineDaily ?? defaultBaselineDaily();
-
-  ["lat","lon"].forEach(id=>{
-    document.getElementById(id).addEventListener("change", (e)=>{ state.forecast[id]=e.target.value; saveState(); });
-  });
-  document.getElementById("rainWindow").addEventListener("change", e=>{ state.forecast.rainWindow=+e.target.value; saveState(); });
-  document.getElementById("runoffEff").addEventListener("change", e=>{ state.forecast.runoffEff=+e.target.value; saveState(); });
-  document.getElementById("wateringDays").addEventListener("change", e=>{ state.forecast.wateringDays=+e.target.value; saveState(); if(lastForecast) renderForecastResult(lastForecast); });
-  document.getElementById("baselineDaily").addEventListener("change", e=>{ state.forecast.baselineDaily=+e.target.value||null; saveState(); if(lastForecast) renderForecastResult(lastForecast); });
-  document.getElementById("etOverride").addEventListener("change", e=>{ state.forecast.etOverride = e.target.value===""?null:+e.target.value; saveState(); if(lastForecast) renderForecastResult(lastForecast); });
-}
-
-function defaultBaselineDaily(){
-  const targets = state.zones.filter(z=>z.targetIn>0).map(z=>z.targetIn);
-  const avgTarget = targets.length ? targets.reduce((a,b)=>a+b,0)/targets.length : 1.0;
-  const days = +document.getElementById("wateringDays")?.value || state.forecast.wateringDays || 3;
-  return +(avgTarget/days).toFixed(3);
-}
-
-document.getElementById("btnGeolocate").addEventListener("click", ()=>{
-  if(!navigator.geolocation){ alert("Geolocation isn't available in this browser."); return; }
-  navigator.geolocation.getCurrentPosition(pos=>{
-    document.getElementById("lat").value = pos.coords.latitude.toFixed(4);
-    document.getElementById("lon").value = pos.coords.longitude.toFixed(4);
-    state.forecast.lat = document.getElementById("lat").value;
-    state.forecast.lon = document.getElementById("lon").value;
-    saveState();
-  }, err=>{
-    alert("Couldn't get your location (" + err.message + "). Enter latitude/longitude manually instead.");
-  });
-});
-
-let lastForecast = null;
-
-async function fetchForecast(){
-  const statusEl = document.getElementById("forecastStatus");
-  const lat = parseFloat(document.getElementById("lat").value);
-  const lon = parseFloat(document.getElementById("lon").value);
-  if(isNaN(lat) || isNaN(lon)){ alert("Enter a valid latitude and longitude first."); return; }
-
-  statusEl.style.display = "inline-flex"; statusEl.textContent = "Fetching…";
-  document.getElementById("forecastEmpty").style.display="block";
-  document.getElementById("forecastResult").style.display="none";
-
-  try{
-    const ptRes = await fetch(`https://api.weather.gov/points/${lat},${lon}`);
-    if(!ptRes.ok) throw new Error("points lookup failed ("+ptRes.status+")");
-    const pt = await ptRes.json();
-    const gridUrl = pt.properties.forecastGridData;
-    if(!gridUrl) throw new Error("No forecast grid for this location");
-
-    const gridRes = await fetch(gridUrl);
-    if(!gridRes.ok) throw new Error("grid data fetch failed ("+gridRes.status+")");
-    const gridData = await gridRes.json();
-    const props = gridData.properties;
-
-    const windowHrs = +document.getElementById("rainWindow").value;
-    const now = new Date();
-    const windowEnd = new Date(now.getTime() + windowHrs*3600*1000);
-
-    const rainMm = sumSeriesInWindow(props.quantitativePrecipitation, now, windowEnd);
-    const rainIn = rainMm / 25.4;
-
-    // Temps for Hargreaves: take max of maxTemperature and min of minTemperature over the window (or today)
-    const tmaxC = maxSeriesInWindow(props.maxTemperature, now, windowEnd);
-    const tminC = minSeriesInWindow(props.minTemperature, now, windowEnd);
-
-    let et0In = null;
-    if(tmaxC !== null && tminC !== null){
-      et0In = hargreavesET0(lat, tmaxC, tminC, now) / 25.4;
-    }
-
-    lastForecast = { lat, lon, rainIn, tmaxC, tminC, et0In, place: pt.properties.relativeLocation?.properties, windowHrs };
-    statusEl.textContent = "Updated " + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-    renderForecastResult(lastForecast);
-  }catch(err){
-    console.error(err);
-    statusEl.textContent = "Failed";
-    alert("Couldn't fetch the NWS forecast: " + err.message + "\n\nYou can still use the ET₀ override field to enter numbers manually.");
-  }
-}
-document.getElementById("btnFetchForecast").addEventListener("click", fetchForecast);
-
-// NWS gridpoint time series values look like: { uom, values:[{validTime:"2026-07-17T18:00:00+00:00/PT6H", value: 1.27}, ...] }
-function parseValidTime(vt){
-  const [startStr, durStr] = vt.split("/");
-  const start = new Date(startStr);
-  const dur = parseISODuration(durStr);
-  const end = new Date(start.getTime() + dur*1000);
-  return {start, end};
-}
-function parseISODuration(d){
-  // supports PnDTnHnMnS style subset used by NWS (PT#H, P#DT#H etc.)
-  const m = /P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?/.exec(d);
-  if(!m) return 0;
-  const days = +(m[1]||0), hrs = +(m[2]||0), mins = +(m[3]||0);
-  return days*86400 + hrs*3600 + mins*60;
-}
-
-function sumSeriesInWindow(series, winStart, winEnd){
-  if(!series || !series.values) return 0;
-  let total = 0;
-  for(const v of series.values){
-    const {start, end} = parseValidTime(v.validTime);
-    if(end <= winStart || start >= winEnd) continue;
-    // overlap fraction
-    const ovStart = start < winStart ? winStart : start;
-    const ovEnd = end > winEnd ? winEnd : end;
-    const frac = (ovEnd-ovStart) / (end-start || 1);
-    if(v.value !== null && v.value !== undefined) total += v.value * frac;
-  }
-  return total;
-}
-function maxSeriesInWindow(series, winStart, winEnd){
-  if(!series || !series.values) return null;
-  let best = null;
-  for(const v of series.values){
-    const {start, end} = parseValidTime(v.validTime);
-    if(end <= winStart || start >= winEnd) continue;
-    if(v.value===null||v.value===undefined) continue;
-    if(best===null || v.value>best) best = v.value;
-  }
-  return best;
-}
-function minSeriesInWindow(series, winStart, winEnd){
-  if(!series || !series.values) return null;
-  let best = null;
-  for(const v of series.values){
-    const {start, end} = parseValidTime(v.validTime);
-    if(end <= winStart || start >= winEnd) continue;
-    if(v.value===null||v.value===undefined) continue;
-    if(best===null || v.value<best) best = v.value;
-  }
-  return best;
-}
-
-// Hargreaves-Samani ET0, returns mm/day
-function hargreavesET0(latDeg, tmaxC, tminC, date){
-  const lat = latDeg * Math.PI/180;
-  const start = new Date(date.getFullYear(),0,0);
-  const J = Math.floor((date - start)/86400000);
-  const dr = 1 + 0.033*Math.cos(2*Math.PI/365*J);
-  const delta = 0.409*Math.sin(2*Math.PI/365*J - 1.39);
-  let ws = Math.acos(clamp(-Math.tan(lat)*Math.tan(delta), -1, 1));
-  const Gsc = 0.0820;
-  const Ra = (24*60/Math.PI)*Gsc*dr*(ws*Math.sin(lat)*Math.sin(delta) + Math.cos(lat)*Math.cos(delta)*Math.sin(ws)); // MJ/m2/day
-  const RaMm = 0.408*Ra; // equivalent evaporation mm/day
-  const tmean = (tmaxC+tminC)/2;
-  const diff = Math.max(0, tmaxC-tminC);
-  return 0.0023 * RaMm * (tmean+17.8) * Math.sqrt(diff);
-}
-
-function renderForecastResult(f){
-  document.getElementById("forecastEmpty").style.display = "none";
-  document.getElementById("forecastResult").style.display = "block";
-
-  const et0 = state.forecast.etOverride ?? f.et0In;
-  const rain = f.rainIn;
-  const runoffEff = +document.getElementById("runoffEff").value || 0.8;
-  const effectiveRain = rain * runoffEff;
-  const netNeed = (et0||0) - effectiveRain;
-  const baseline = +document.getElementById("baselineDaily").value || defaultBaselineDaily();
-  const adjPct = baseline>0 ? clamp(netNeed/baseline, 0, 1.5) : 0;
-
-  document.getElementById("forecastStats").innerHTML = `
-    <div class="stat"><div class="v">${fmt(rain,2)}"</div><div class="l">Forecast rain (${f.windowHrs}h)</div></div>
-    <div class="stat"><div class="v">${et0===null||et0===undefined?"–":fmt(et0,2)+'"'}</div><div class="l">ET₀ ${state.forecast.etOverride!=null?"(override)":"(estimate)"}</div></div>
-    <div class="stat"><div class="v">${fmt(effectiveRain,2)}"</div><div class="l">Effective rain</div></div>
-    <div class="stat ${netNeed<=0?'':''}"><div class="v">${fmt(netNeed,2)}"</div><div class="l">Net water need</div></div>
-    <div class="stat"><div class="v">${fmt(adjPct*100,0)}%</div><div class="l">Suggested adjustment</div></div>
-  `;
-
-  const tbody = document.querySelector("#adjustedTable tbody");
-  tbody.innerHTML = "";
-  state.zones.forEach(z=>{
-    const adjMin = Math.round(z.runMin * adjPct);
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><span class="zone-swatch" style="background:${zoneColor(z.id)}"></span>${escapeHtml(z.name)}</td>
-      <td>${z.runMin} min</td>
-      <td>${fmt(adjPct*100,0)}%</td>
-      <td><b>${adjMin} min</b></td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  document.getElementById("forecastNote").textContent = netNeed<=0
-    ? "Forecasted rain covers (or exceeds) estimated water need — consider skipping irrigation."
-    : "Suggested run time = base run time × adjustment %. Adjust the baseline daily need above if this feels off for your area/season.";
-}
-
-/* ============================= SAVE / LOAD UI ============================= */
-
-document.getElementById("btnExport").addEventListener("click", exportJSON);
-document.getElementById("btnImportTrigger").addEventListener("click", ()=> document.getElementById("btnImport").click());
-document.getElementById("btnImport").addEventListener("change", (e)=>{
-  if(e.target.files && e.target.files[0]) importJSONFile(e.target.files[0]);
-  e.target.value = "";
-});
-document.getElementById("btnNew").addEventListener("click", ()=>{
-  if(confirm("Start a new blank project? This clears the yard, zones, and heads currently loaded (your saved data stays in this browser until you overwrite it — export first if unsure).")){
-    state = defaultState();
-    saveState(true);
-    renderAll();
-  }
-});
-
-/* ============================= INIT ============================= */
-
-function renderAll(){
-  bindYardFormValuesOnly();
-  renderZoneTable();
-  renderHeadsTable();
-  drawYardCanvas();
-  bindForecastFormValuesOnly();
-}
-function bindYardFormValuesOnly(){
-  document.getElementById("yardWidth").value = state.yard.width;
-  document.getElementById("yardHeight").value = state.yard.height;
-  document.getElementById("cellSize").value = state.yard.cellSize;
-}
-function bindForecastFormValuesOnly(){
-  document.getElementById("lat").value = state.forecast.lat || "";
-  document.getElementById("lon").value = state.forecast.lon || "";
-  document.getElementById("baselineDaily").value = state.forecast.baselineDaily ?? defaultBaselineDaily();
-}
-
-function init(){
-  bindYardForm();
-  bindForecastForm();
-  renderZoneTable();
-  renderHeadsTable();
-
-  // seed a couple of example heads on first-ever load so the canvas isn't empty
-  if(state.heads.length === 0 && !localStorage.getItem(STORAGE_KEY+"_seeded")){
-    addHead({ id:"H1", zone:1, x:15, y:10, radius:20, arcStart:0, arcEnd:360, gpm:2.5, notes:"example — edit or delete me" });
-    addHead({ id:"H2", zone:1, x:45, y:10, radius:22, arcStart:0, arcEnd:360, gpm:2.5, notes:"example — edit or delete me" });
-    localStorage.setItem(STORAGE_KEY+"_seeded","1");
-  }
-
-  drawYardCanvas();
-  document.getElementById("saveStatus").textContent = "Loaded";
-}
-
-init();
-
-})();
-</script>
+<script type="module" src="./js/app.js"></script>
 </body>
 </html>

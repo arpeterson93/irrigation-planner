@@ -1,0 +1,26 @@
+{
+  "yard": { "width": 80, "height": 60, "cellSize": 2 },
+  "zones": [
+    { "id": 1, "name": "Front lawn", "runMin": 20, "targetIn": 1.0, "gpmAvail": 9.5 },
+    { "id": 2, "name": "Back lawn", "runMin": 25, "targetIn": 1.2, "gpmAvail": 11 },
+    { "id": 3, "name": "Side beds", "runMin": 15, "targetIn": 0.8, "gpmAvail": 0 },
+    { "id": 4, "name": "Zone 4", "runMin": 20, "targetIn": 1.0, "gpmAvail": 10 },
+    { "id": 5, "name": "Zone 5", "runMin": 20, "targetIn": 1.0, "gpmAvail": 10 },
+    { "id": 6, "name": "Zone 6", "runMin": 20, "targetIn": 1.0, "gpmAvail": 10 }
+  ],
+  "heads": [
+    { "id": "H1", "zone": 1, "x": 5, "y": 5, "radius": 39, "arcStart": 0, "arcEnd": 90, "gpm": 2.91, "notes": "corner rotor" },
+    { "id": "H2", "zone": 1, "x": 40, "y": 5, "radius": 39, "arcStart": 180, "arcEnd": 270, "gpm": 2.91, "notes": "" },
+    { "id": "H3", "zone": 2, "x": 20, "y": 55, "radius": 25, "arcStart": 0, "arcEnd": 200, "gpm": 3.08, "notes": "fixed spray head" },
+    { "id": "H4", "zone": 3, "x": 70, "y": 30, "radius": 12, "arcStart": 90, "arcEnd": 270, "gpm": 1.5, "notes": "" }
+  ],
+  "forecast": {
+    "lat": "39.7456",
+    "lon": "-97.0892",
+    "rainWindow": 48,
+    "runoffEff": 0.8,
+    "wateringDays": 3,
+    "baselineDaily": 0.333,
+    "etOverride": null
+  }
+}

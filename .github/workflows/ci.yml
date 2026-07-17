@@ -17,20 +17,21 @@ jobs:
           python-version: "3.12"
 
       - name: Install test dependencies
-        run: pip install pytest
+        run: pip install -r scripts/requirements.txt
 
-      - name: Run golden math tests
+      - name: Run golden math + migration tests
         run: pytest tests/ -v
 
       - name: Check for em dashes in shipped app copy
-        # Scoped to docs/js and docs/css only. legacy/sprinkler-simulator.html is kept
-        # verbatim on purpose (PLAN.md section 2) and still contains its original em
-        # dashes, and docs/index.html is a verbatim copy of it until Phase 1 replaces
-        # it with a markup-only shell (PLAN.md task 10). Widen this to include
-        # docs/index.html once that Phase 1 swap has happened.
+        # Phase 1 replaced docs/index.html with a markup-only shell and split the
+        # app into docs/js + docs/css, so the whole docs/ tree is now swept (task
+        # 10). legacy/sprinkler-simulator.html is intentionally excluded: it is kept
+        # verbatim for reference (PLAN.md section 2) and still has its original em
+        # dashes. En dashes (U+2013) and subscripts are allowed; only em dashes
+        # (U+2014) are banned.
         run: |
-          if grep -rP '\x{2014}' docs/js/ docs/css/ 2>/dev/null; then
-            echo "Em dash found in the files above. Remove it (see PLAN.md general requirements)."
+          if grep -rP '\x{2014}' docs/ 2>/dev/null; then
+            echo "Em dash found in the files above. Remove it (see PLAN.md task 10)."
             exit 1
           fi
-          echo "No em dashes found (docs/js, docs/css)."
+          echo "No em dashes found in docs/."
