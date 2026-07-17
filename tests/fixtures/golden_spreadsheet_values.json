@@ -1,0 +1,71 @@
+{
+  "_comment": "Values cross-checked against the original Google Sheet ('Sprinkler Simulator - Future') during the v1 build. Each head case reproduces the sheet's own 'Session Water (in)' column to within rounding. These pin the core formula: precipRateInHr = 96.3 * gpm / sectorAreaSqFt, sectorAreaSqFt = pi * radius^2 * (arcSpanDeg / 360), sessionWaterIn = precipRateInHr * (runTimeMin / 60).",
+
+  "head_precip_cases": [
+    {
+      "label": "H1 (sheet Zone 1) - quarter circle rotor",
+      "gpm": 2.91,
+      "radiusFt": 39,
+      "arcStartDeg": 0,
+      "arcEndDeg": 90,
+      "runTimeMin": 20,
+      "expectedAreaSqFt": 1194.6,
+      "expectedPrecipRateInHr": 0.2346,
+      "expectedSessionWaterIn": 0.078,
+      "sheetReportedSessionWaterIn": 0.08
+    },
+    {
+      "label": "H3 (sheet Zone 1) - quarter circle rotor, different orientation",
+      "gpm": 2.91,
+      "radiusFt": 39,
+      "arcStartDeg": 180,
+      "arcEndDeg": 270,
+      "runTimeMin": 20,
+      "expectedAreaSqFt": 1194.6,
+      "expectedPrecipRateInHr": 0.2346,
+      "expectedSessionWaterIn": 0.078,
+      "sheetReportedSessionWaterIn": 0.08
+    },
+    {
+      "label": "Zone 3 style head - 200 degree arc, smaller radius",
+      "gpm": 3.08,
+      "radiusFt": 25,
+      "arcStartDeg": 0,
+      "arcEndDeg": 200,
+      "runTimeMin": 20,
+      "expectedAreaSqFt": 1090.83,
+      "expectedPrecipRateInHr": 0.2721,
+      "expectedSessionWaterIn": 0.0907,
+      "sheetReportedSessionWaterIn": 0.09
+    }
+  ],
+
+  "arc_span_cases": [
+    { "label": "simple span, no wrap", "arcStartDeg": 0, "arcEndDeg": 90, "expectedSpanDeg": 90 },
+    { "label": "wraparound through north", "arcStartDeg": 270, "arcEndDeg": 90, "expectedSpanDeg": 180 },
+    { "label": "full circle (start == end)", "arcStartDeg": 0, "arcEndDeg": 0, "expectedSpanDeg": 360 }
+  ],
+
+  "angle_in_arc_cases": [
+    { "arcStartDeg": 270, "arcEndDeg": 90, "testAngleDeg": 0, "expectedInArc": true },
+    { "arcStartDeg": 270, "arcEndDeg": 90, "testAngleDeg": 45, "expectedInArc": true },
+    { "arcStartDeg": 270, "arcEndDeg": 90, "testAngleDeg": 90, "expectedInArc": true },
+    { "arcStartDeg": 270, "arcEndDeg": 90, "testAngleDeg": 135, "expectedInArc": false },
+    { "arcStartDeg": 270, "arcEndDeg": 90, "testAngleDeg": 270, "expectedInArc": true },
+    { "arcStartDeg": 270, "arcEndDeg": 90, "testAngleDeg": 315, "expectedInArc": true },
+    { "arcStartDeg": 270, "arcEndDeg": 90, "testAngleDeg": 180, "expectedInArc": false }
+  ],
+
+  "hargreaves_et0_cases": [
+    {
+      "label": "peak summer, mid-latitude (~39.7N, e.g. Kansas), hot day",
+      "latitudeDeg": 39.7,
+      "tmaxC": 33,
+      "tminC": 20,
+      "dayOfYear": 198,
+      "expectedEt0MmDay": 6.09,
+      "expectedEt0InDay": 0.24,
+      "sanityRangeInDay": [0.15, 0.32]
+    }
+  ]
+}
