@@ -91,7 +91,7 @@ export function makeZone(index) {
 export function defaultState() {
   return {
     schemaVersion: SCHEMA_VERSION,
-    yard: { widthFt: 80, heightFt: 60, cellSizeFt: 2 },
+    yard: { widthFt: 80, heightFt: 60, cellSizeFt: 1 },
     sprinklerZones: Array.from({ length: INITIAL_ZONES }, (_, i) => makeZone(i)),
     yardZones: [],
     deadSpaces: [],
@@ -175,7 +175,6 @@ export function migrateV1toV2(v1) {
       arcEndDeg: Number(h.arcEnd) || 0,
       ratedGpm: Number(h.gpm) || 0,
       ...(type ? { type } : {}),
-      nozzleFamily: "",
       brand: "",
       model: "",
       nozzle: "",
@@ -217,13 +216,17 @@ export function normalizeV2(raw) {
   const d = defaultState();
   const out = Object.assign({}, raw);
   out.schemaVersion = SCHEMA_VERSION;
-  out.yard = Object.assign({ cellSizeFt: 2 }, d.yard, raw.yard || {});
+  out.yard = Object.assign({ cellSizeFt: 1 }, d.yard, raw.yard || {});
   out.sprinklerZones = Array.isArray(raw.sprinklerZones) && raw.sprinklerZones.length
     ? raw.sprinklerZones.map((z) => Object.assign({}, z, { schedule: normalizeSchedule(z.schedule) }))
     : d.sprinklerZones;
   out.yardZones = Array.isArray(raw.yardZones) ? raw.yardZones : [];
   out.deadSpaces = Array.isArray(raw.deadSpaces) ? raw.deadSpaces : [];
-  out.heads = Array.isArray(raw.heads) ? raw.heads : [];
+  // Strip the retired nozzleFamily field from any older blob (PLAN.md task 42);
+  // nozzle (the specific model) is kept.
+  out.heads = Array.isArray(raw.heads)
+    ? raw.heads.map((h) => { const { nozzleFamily, ...rest } = h; return rest; })
+    : [];
   out.background = Object.assign(defaultBackground(), raw.background || {});
   out.forecast = Object.assign(defaultForecast(), raw.forecast || {});
   out.sync = Object.assign(defaultSync(), raw.sync || {});

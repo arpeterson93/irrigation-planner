@@ -64,6 +64,22 @@ The app never calls a maps API. You supply the image:
    your heads and areas on top. Adjust opacity so both the image and your wedges
    are visible.
 
+## Using it on a phone
+
+The app adapts to small screens without a separate mobile version:
+
+- On narrow screens the 17-column **Sprinkler heads** table becomes a **card per
+  head**: the geometry fields (type, X, Y, radius, arc, GPM) are visible, and the
+  audit fields (brand, model, nozzle, riser, replace, notes) tuck behind a **More**
+  expander. Everything is still editable inline, which suits walking the yard and
+  marking heads for replacement from your phone.
+- On touch devices the yard-preview drag handles get larger touch targets. For
+  exact arc and radius values that fingertips can't hit precisely, select a head
+  and tap **Edit head** (above the preview) to open a focused editor that applies
+  changes live.
+- The read-mostly tables (zone summary, usage, forecast) scroll sideways within
+  their own box; the page itself does not scroll horizontally.
+
 ## Cloud sync (optional)
 
 The app is fully usable with just browser-local storage plus JSON export/import

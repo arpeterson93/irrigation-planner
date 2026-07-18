@@ -112,7 +112,6 @@
           "arcEndDeg": { "type": "number" },
           "ratedGpm": { "type": "number", "minimum": 0 },
           "type": { "enum": ["rotary", "fixed"] },
-          "nozzleFamily": { "type": "string" },
           "brand": { "type": "string" },
           "model": { "type": "string" },
           "nozzle": { "type": "string" },

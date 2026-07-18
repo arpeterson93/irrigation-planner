@@ -156,6 +156,7 @@ td.replace-cell{text-align:center;}
 #forecastTable td:first-child, #forecastTable th:first-child{font-weight:650; color:var(--ink-700);}
 #forecastTable .dim{opacity:.55;}
 .cell-muted{color:var(--ink-300); font-style:italic;}
+#forecastTable td.warn{background:#fdf2e2; color:var(--amber-500); cursor:help;}
 
 /* --- Phase 2 additions --- */
 #yardCanvas{touch-action:none;}
@@ -163,3 +164,45 @@ td.replace-cell{text-align:center;}
 .mode-btn.active{background:var(--green-500); color:#fff; border-color:var(--green-500);}
 input[type=range]{width:90px; vertical-align:middle;}
 input[type=color]{height:28px; border:1px solid var(--border); border-radius:6px; background:#fff; cursor:pointer;}
+
+/* --- Phase 8 additions (mobile / small-screen) ---
+   The 700px layout breakpoint below MUST stay in sync with viewport.js's
+   isNarrow(); interaction affordances are gated on (pointer: coarse) to match
+   isCoarse(). Everything here is strictly additive: no rule outside these two
+   queries changes, so the desktop layout is untouched (PLAN.md 8.1, task 50). */
+
+/* Head cards: hidden by default (desktop uses the 17-column table); the media
+   query below swaps them in for the table under 700px. */
+#headsCards{display:none;}
+.head-card{
+  border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:12px; background:#fff;
+}
+.head-card.selected{background:var(--green-100); border-color:var(--green-500);}
+.head-card-head{display:flex; align-items:center; gap:8px; margin-bottom:10px;}
+.head-card-head .hc-id{width:72px;}
+.head-card-head .hc-zone{width:66px;}
+.head-card-head button{margin-left:auto;}
+.head-card .hc-flag{margin:6px 0;}
+.head-card .hc-flag:empty{display:none;}
+.head-card details.hc-more{margin-top:10px; border-top:1px dashed var(--border); padding-top:8px;}
+.head-card details.hc-more summary{cursor:pointer; font-size:12.5px; font-weight:600; color:var(--green-700); padding:4px 0;}
+
+@media (max-width: 700px){
+  #headsTableWrap{display:none;}
+  #headsCards{display:block;}
+  header{padding:12px 14px;}
+  .header-actions{gap:6px;}
+  main{padding:14px 12px 48px;}
+  .card{padding:14px;}
+  /* Mode buttons scroll horizontally instead of stacking into a tall block,
+     matching how nav.tabs already behaves. */
+  .mode-toolbar{flex-wrap:nowrap; overflow-x:auto;}
+  /* 16px is the standard fix for iOS Safari auto-zooming the page when a
+     sub-16px input is focused. */
+  input[type=text], input[type=number], select, td input, td select{font-size:16px;}
+}
+
+@media (pointer: coarse){
+  button{min-height:42px;}
+  td .btn-sm{padding:8px 12px;}
+}

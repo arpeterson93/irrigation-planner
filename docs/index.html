@@ -47,12 +47,12 @@
       <div class="inline-dims">
         <div class="field"><label>Width (ft, X)</label><input type="number" id="yardWidth" min="5" max="1000" step="1"></div>
         <div class="field"><label>Depth (ft, Y)</label><input type="number" id="yardHeight" min="5" max="1000" step="1"></div>
-        <div class="field"><label>Grid cell (ft)</label><input type="number" id="cellSize" min="0.5" max="10" step="0.5"></div>
+        <div class="field"><label>Grid cell (ft)</label><input type="number" id="cellSize" min="1" max="10" step="1"></div>
         <div class="hint" style="margin:0; align-self:center;">Smaller cell = more precise heatmap but slower. 1 to 2 ft is a good balance.</div>
       </div>
     </div>
 
-    <div class="grid cols-2">
+    <div class="yard-stack">
       <div class="card">
         <div class="zone-controls">
           <h2 style="margin:0;">Zones <span class="muted" style="font-weight:400;">(up to 12 controllable zones)</span></h2>
@@ -69,7 +69,7 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" style="margin-top:18px;">
         <h2>Yard preview</h2>
         <p class="hint">Drag a head to move it; select one to get radius and arc handles. Hold Alt while dragging for free (unsnapped) movement.</p>
         <div class="toolbar mode-toolbar" id="canvasTools" style="margin-bottom:8px;">
@@ -78,10 +78,14 @@
           <button class="btn-light btn-sm mode-btn" data-mode="deadspace">+ Dead space</button>
           <button class="btn-light btn-sm mode-btn" data-mode="calibrate">Calibrate scale</button>
           <button class="btn-light btn-sm mode-btn" data-mode="bgmove">Move image</button>
+          <!-- Precision editor for the selected head; shown only on coarse-pointer
+               or narrow devices where drag handles can't hit exact values
+               (PLAN.md task 48). Not a mode button. -->
+          <button class="btn-light btn-sm" id="btnEditHead" style="display:none;">Edit head</button>
         </div>
         <div class="hint" id="canvasHint" style="margin-bottom:8px;"></div>
         <div class="canvas-wrap">
-          <canvas id="yardCanvas" height="480"></canvas>
+          <canvas id="yardCanvas" height="560"></canvas>
           <div class="canvas-tip" id="yardTip"></div>
         </div>
         <div class="toolbar" style="margin-top:12px;">
@@ -118,13 +122,16 @@
       <div class="table-wrap" id="headsTableWrap">
         <table id="headsTable">
           <thead><tr>
-            <th></th><th>ID</th><th>Zone</th><th>X (ft)</th><th>Y (ft)</th><th>Radius (ft)</th>
+            <th></th><th>ID</th><th>Zone</th><th>Type</th><th>X (ft)</th><th>Y (ft)</th><th>Radius (ft)</th>
             <th>Arc start°</th><th>Arc end°</th><th>GPM</th>
-            <th>Type</th><th>Nozzle family</th><th>Brand</th><th>Model</th><th>Nozzle</th><th>Riser (in)</th><th>Replace?</th><th>Notes</th><th></th>
+            <th>Brand</th><th>Model</th><th>Nozzle</th><th>Riser (in)</th><th>Replace?</th><th>Notes</th><th></th>
           </tr></thead>
           <tbody></tbody>
         </table>
       </div>
+      <!-- Card-per-head list, shown below the 700px breakpoint in place of the
+           17-column table (PLAN.md task 46). Rendered by renderHeadsCards(). -->
+      <div id="headsCards"></div>
     </div>
 
     <div class="grid cols-2" style="margin-top:18px;">
@@ -133,7 +140,7 @@
         <p class="hint">Free-form areas independent of valve wiring (e.g. "Front lawn"), used for grouping coverage stats. Draw one with the "+ Yard zone" tool on the preview.</p>
         <div class="table-wrap">
           <table id="yardZoneTable">
-            <thead><tr><th>Color</th><th>Name</th><th>Vertices</th><th></th></tr></thead>
+            <thead><tr><th>Color</th><th>Name</th><th>Vertices</th><th>Area (sq ft)</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -145,7 +152,7 @@
         <p class="hint">Areas that should not count as watered turf (house, patio, driveway, beds). Draw one with the "+ Dead space" tool on the preview; they render hatched.</p>
         <div class="table-wrap">
           <table id="deadSpaceTable">
-            <thead><tr><th>Label</th><th>Kind</th><th>Vertices</th><th></th></tr></thead>
+            <thead><tr><th>Label</th><th>Kind</th><th>Vertices</th><th>Area (sq ft)</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -220,7 +227,6 @@
         <div class="field"><label>Latitude</label><input type="text" id="lat" placeholder="e.g. 39.7456"></div>
         <div class="field"><label>Longitude</label><input type="text" id="lon" placeholder="e.g. -97.0892"></div>
         <div class="field"><label>Runoff / uptake efficiency (%)</label><input type="number" id="runoffEff" min="10" max="100" step="5" value="80"></div>
-        <div class="field"><label>Show adjustments for</label><select id="forecastZone"></select></div>
       </div>
       <div class="toolbar" style="margin-bottom:0; align-items:center;">
         <button class="btn-light btn-sm" id="btnGeolocate">📍 Use my location</button>
@@ -250,7 +256,7 @@
       <h3>Forecast ET₀ estimate</h3>
       <p class="hint">Reference evapotranspiration is estimated with the Hargreaves-Samani equation using your latitude and the NWS-forecasted daily high/low temperature, a widely used simplified method when a dedicated ET station isn't available. It's an estimate, not a substitute for a local CIMIS/AgriMet reading if you have access to one; use the override field if so.</p>
       <h3>Seasonal adjustment</h3>
-      <p class="hint">Net water need = ET₀ minus (forecasted rain × runoff efficiency). Adjustment % = net need ÷ baseline daily need. Each zone's suggested run time = its configured run time × adjustment % (clamped 0 to 150%).</p>
+      <p class="hint">Net water need = ET₀ minus (forecasted rain × runoff efficiency). Adjustment % = net need ÷ baseline daily need. Each zone's suggested run time = its configured run time × adjustment %, rounded to the nearest 10% and clamped between 0% and 150%. A ▲ marks days whose unclamped need ran past 150% (watering was capped).</p>
       <h3>Your data</h3>
       <p class="hint">Everything you enter is saved automatically in this browser (localStorage); nothing is sent anywhere except the two anonymous, keyless calls to the public NWS API when you fetch a forecast. Use <b>Export JSON</b> any time to back up or move your yard to another device, and <b>Import JSON</b> to restore it.</p>
     </div>

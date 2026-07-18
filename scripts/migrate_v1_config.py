@@ -93,7 +93,6 @@ def migrate(v1):
             "arcStartDeg": float(h.get("arcStart") or 0),
             "arcEndDeg": float(h.get("arcEnd") or 0),
             "ratedGpm": float(h.get("gpm") or 0),
-            "nozzleFamily": "",
             "brand": "",
             "model": "",
             "nozzle": "",
@@ -138,10 +137,12 @@ def migrate(v1):
 
 
 def _default_zones():
+    # Match state.js's default schedule (three evenly spaced weekdays), which is
+    # what normalizeSchedule() coerces the retired n_per_week:3 blob into anyway.
     return [{
         "id": f"sz{i + 1}", "name": f"Zone {i + 1}", "supplyGpm": 10,
         "runTimeMin": 20, "weeklyTargetIn": 1.0,
-        "schedule": {"mode": "n_per_week", "nPerWeek": 3},
+        "schedule": {"mode": "days_of_week", "daysOfWeek": evenly_spaced_weekdays(3)},
     } for i in range(6)]
 
 

@@ -10,14 +10,15 @@
  * Phase 2 adds the interaction engine (PLAN.md tasks 11-14):
  *   - drag-to-move heads (mouse + touch via Pointer Events)
  *   - radius + arc-start/arc-end drag handles on the selected head, with snapping
- *     (0.5 ft position/radius, 5 degrees arc) and Alt for free movement
+ *     (1 ft position/radius, 5 degrees arc) and Alt for free movement
  *   - polygon drawing/editing for yard zones (tinted) and dead spaces (hatched)
  *   - background reference image: upload/compress, opacity, rotation, drag,
  *     two-point scale calibration
  * ========================================================================== */
 
-import { getState, saveState, zoneColorFor, fmt, uid } from "./state.js";
+import { getState, saveState, zoneColorFor, fmt, uid, clamp } from "./state.js";
 import { arcSpan, headPrecipRate, colorForValue, norm360, bearingTo } from "./coverage.js";
+import { isCoarse, isNarrow } from "./viewport.js";
 
 /* ------------------------------- module state ----------------------------- */
 
@@ -31,10 +32,32 @@ let calibPoints = [];       // yard-feet points collected during calibration
 let selectedArea = null;    // { kind:'yardzone'|'deadspace', id }
 const bgCache = { url: null, img: null };
 
-const HANDLE_HIT_PX = 12;
-const HEAD_HIT_PX = 10;
-const VERTEX_HIT_PX = 10;
+// Hit-target sizes are chosen once at module load from the pointer type
+// (PLAN.md task 47): coarse (touch) fingertips need bigger slop than a mouse.
+// Fine pointers resolve to the historical 12/10/10, so desktop is unchanged.
+const COARSE_POINTER = isCoarse();
+const HANDLE_HIT_PX = COARSE_POINTER ? 22 : 12;
+const HEAD_HIT_PX = COARSE_POINTER ? 18 : 10;
+const VERTEX_HIT_PX = COARSE_POINTER ? 18 : 10;
+// Drawn markers scale up on coarse pointers so the visible target matches the
+// (larger) hit target; 1x on fine pointers keeps desktop pixel-identical.
+const MARKER_SCALE = COARSE_POINTER ? 1.5 : 1;
+// Static canvas heights from the HTML attributes; restored above the narrow
+// breakpoint so rotating a tablet back across it returns to the desktop size.
+const YARD_CANVAS_H = 560;
+const HEAT_CANVAS_H = 480;
 const AREA_PALETTE = ["#4caf50", "#2980b9", "#e67e22", "#8e44ad", "#16a085", "#c0392b"];
+
+// Aspect-fit canvas height for narrow viewports (PLAN.md task 45): match the
+// yard's aspect ratio inside the available width, bounded so it neither
+// collapses nor eats the whole screen. Mirrors computeTransform's 20px margin.
+function responsiveCanvasHeight(canvas, staticH) {
+  if (!isNarrow()) return staticH;
+  const yard = getState().yard;
+  const inner = (canvas.clientWidth || canvas.width) - 20;
+  const fit = Math.round(inner * yard.heightFt / yard.widthFt) + 20;
+  return clamp(fit, 240, Math.round(window.innerHeight * 0.65));
+}
 
 export function initCanvas(d) {
   deps = Object.assign(deps, d || {});
@@ -128,6 +151,7 @@ export function drawYardCanvas() {
   const canvas = document.getElementById("yardCanvas");
   if (!canvas || !canvas.offsetParent) return;
   canvas.width = canvas.clientWidth;
+  canvas.height = responsiveCanvasHeight(canvas, YARD_CANVAS_H);
   const ctx = canvas.getContext("2d");
   computeTransform(canvas);
   const selId = deps.getSelectedHeadId();
@@ -231,8 +255,9 @@ function drawHatch(ctx, ptsPx) {
 }
 
 function drawVertices(ctx, ptsPx, color) {
+  const half = 4 * MARKER_SCALE;
   ptsPx.forEach(([x, y]) => {
-    ctx.beginPath(); ctx.rect(x - 4, y - 4, 8, 8);
+    ctx.beginPath(); ctx.rect(x - half, y - half, half * 2, half * 2);
     ctx.fillStyle = "#fff"; ctx.fill();
     ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
   });
@@ -278,7 +303,7 @@ function drawHandles(ctx, head) {
   if (!head) return;
   const hs = headHandlesPx(head);
   const draw = (p, fill) => {
-    ctx.beginPath(); ctx.arc(p[0], p[1], 6, 0, Math.PI * 2);
+    ctx.beginPath(); ctx.arc(p[0], p[1], 6 * MARKER_SCALE, 0, Math.PI * 2);
     ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
   };
   const [hx, hy] = toPx(head.x, head.y);
@@ -384,21 +409,21 @@ function onDragMove(fx, fy, alt) {
   const state = getState();
   if (drag.kind === "vertex") {
     const poly = polyFor(drag.area);
-    if (poly) poly[drag.area.index] = [snap(fx, 0.5, alt), snap(fy, 0.5, alt)];
+    if (poly) poly[drag.area.index] = [snap(fx, 1, alt), snap(fy, 1, alt)];
     drawYardCanvas(); return;
   }
   if (drag.kind === "bg") {
-    state.background.offsetXFt = snap(fx - drag.dx, 0.5, alt);
-    state.background.offsetYFt = snap(fy - drag.dy, 0.5, alt);
+    state.background.offsetXFt = snap(fx - drag.dx, 1, alt);
+    state.background.offsetYFt = snap(fy - drag.dy, 1, alt);
     drawYardCanvas(); return;
   }
   const head = state.heads.find((x) => x.id === drag.headId);
   if (!head) return;
   if (drag.kind === "move") {
-    head.x = snap(fx - drag.dx, 0.5, alt);
-    head.y = snap(fy - drag.dy, 0.5, alt);
+    head.x = snap(fx - drag.dx, 1, alt);
+    head.y = snap(fy - drag.dy, 1, alt);
   } else if (drag.kind === "radius") {
-    head.radiusFt = Math.max(0, snap(Math.hypot(fx - head.x, fy - head.y), 0.5, alt));
+    head.radiusFt = Math.max(0, snap(Math.hypot(fx - head.x, fy - head.y), 1, alt));
   } else if (drag.kind === "arcStart") {
     head.arcStartDeg = snapAngle(bearingTo(fx - head.x, fy - head.y), alt);
   } else if (drag.kind === "arcEnd") {
@@ -422,7 +447,7 @@ function onDrawDown(fx, fy) {
     const [pxL, pyL] = toPx(...pts[pts.length - 1]);
     if (Math.hypot(pxN - pxL, pyN - pyL) < VERTEX_HIT_PX) return;
   }
-  pts.push([Math.round(fx * 2) / 2, Math.round(fy * 2) / 2]);
+  pts.push([Math.round(fx), Math.round(fy)]); // 1 ft grid for polygon vertices
   drawYardCanvas();
 }
 
@@ -595,6 +620,7 @@ export function drawHeatmap(data) {
   if (!canvas || !canvas.offsetParent) return;
   lastHeatData = data;
   canvas.width = canvas.clientWidth;
+  canvas.height = responsiveCanvasHeight(canvas, HEAT_CANVAS_H);
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -616,23 +642,57 @@ export function drawHeatmap(data) {
   const avgCycles = cyclesVals.length ? cyclesVals.reduce((a, b) => a + b, 0) / cyclesVals.length : 3.5;
   const ref = (targetRef / avgCycles) || 0.3;
 
+  // Paint the water-depth color for EVERY cell, including dead-space cells, so you
+  // can see how much water is landing where it shouldn't (PLAN.md task 33). Dead
+  // cells are then overlaid with a diagonal hatch (below); they remain excluded
+  // from coverage.js stats/rollups, this is rendering-only.
   for (let r = 0; r < data.rows; r++) {
     for (let c = 0; c < data.cols; c++) {
       const x = offX + c * cellPx;
       const y = offY + (data.rows - 1 - r) * cellPx; // y-flip: grid row 0 is bottom
-      if (data.deadMask && data.deadMask[r][c]) {
-        ctx.fillStyle = "rgba(120,130,125,0.5)"; // dead space: neutral, excluded from stats
-      } else {
-        ctx.fillStyle = colorForValue(grid[r][c], ref);
-      }
+      ctx.fillStyle = colorForValue(grid[r][c], ref);
       ctx.fillRect(x, y, cellPx + 0.5, cellPx + 0.5);
     }
+  }
+  if (data.deadMask) {
+    ctx.save();
+    ctx.fillStyle = deadHatchPattern(ctx);
+    for (let r = 0; r < data.rows; r++) {
+      for (let c = 0; c < data.cols; c++) {
+        if (!data.deadMask[r][c]) continue;
+        const x = offX + c * cellPx;
+        const y = offY + (data.rows - 1 - r) * cellPx;
+        ctx.fillRect(x, y, cellPx + 0.5, cellPx + 0.5);
+      }
+    }
+    ctx.restore();
   }
   ctx.strokeStyle = "#8fb8a0"; ctx.lineWidth = 1.5;
   ctx.strokeRect(offX, offY, data.cols * cellPx, data.rows * cellPx);
 
   canvas._grid = grid; canvas._offX = offX; canvas._offY = offY;
   canvas._cellPx = cellPx; canvas._data = data;
+}
+
+// Diagonal-hatch pattern for dead-space cells on the heatmap, built once from a
+// small offscreen tile (~8px repeat, semi-transparent gray) so the underlying
+// water-depth color reads through (PLAN.md task 33).
+let hatchPattern = null;
+function deadHatchPattern(ctx) {
+  if (hatchPattern) return hatchPattern;
+  const size = 8;
+  const off = document.createElement("canvas");
+  off.width = size; off.height = size;
+  const octx = off.getContext("2d");
+  octx.strokeStyle = "rgba(70,80,75,0.55)";
+  octx.lineWidth = 1.5;
+  octx.beginPath();
+  octx.moveTo(0, size); octx.lineTo(size, 0);            // main diagonal
+  octx.moveTo(-2, 2); octx.lineTo(2, -2);                // corner wraps for a seamless tile
+  octx.moveTo(size - 2, size + 2); octx.lineTo(size + 2, size - 2);
+  octx.stroke();
+  hatchPattern = ctx.createPattern(off, "repeat");
+  return hatchPattern;
 }
 
 export function redrawHeatmap() { if (lastHeatData) drawHeatmap(lastHeatData); }
@@ -651,8 +711,9 @@ function attachHeatHover() {
     const r = canvas._data.rows - 1 - screenRow;
     if (r < 0 || c < 0 || r >= canvas._data.rows || c >= canvas._data.cols) { tip.style.display = "none"; return; }
     const v = canvas._grid[r][c];
+    const dead = canvas._data.deadMask && canvas._data.deadMask[r] && canvas._data.deadMask[r][c];
     tip.style.display = "block"; tip.style.left = mx + "px"; tip.style.top = my + "px";
-    tip.textContent = `${fmt(v, 3)} in this cycle`;
+    tip.textContent = `${fmt(v, 3)} in this cycle${dead ? " (dead space)" : ""}`;
   });
   canvas.addEventListener("mouseleave", () => { tip.style.display = "none"; });
 }

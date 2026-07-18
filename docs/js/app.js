@@ -13,7 +13,7 @@ import {
 import { isSyncConfigured, pullFromCloud, pushToCloud } from "./sync.js";
 import {
   computeCoverage, statsOverCells, avgOverCells, pointInPolygon,
-  zoneRatedGpm, zoneScaleFactor, headPrecipRate,
+  zoneRatedGpm, zoneScaleFactor, headPrecipRate, polygonAreaSqFt,
 } from "./coverage.js";
 import {
   initCanvas, drawYardCanvas, drawHeatmap, redrawHeatmap, getLastHeatData,
@@ -24,6 +24,7 @@ import { zoneFlowGpm, estimateGallons } from "./usage.js";
 import {
   bindForecastForm, bindForecastFormValuesOnly, attachForecastActions, renderForecast,
 } from "./forecast.js";
+import { isNarrow, isCoarse, onViewportChange } from "./viewport.js";
 
 /* ------------------------------- UI state --------------------------------- */
 
@@ -32,17 +33,15 @@ let selectedHeadId = null;
 const NUMERIC_HEAD_FIELDS = ["x", "y", "radiusFt", "arcStartDeg", "arcEndDeg", "ratedGpm"];
 const DEAD_SPACE_KINDS = ["house", "patio", "deck", "driveway", "pool", "bed", "other"];
 
-// Shared selection entry point used by both the heads table and the canvas, so
-// selecting in one place highlights and scrolls the other (PLAN.md task 11).
+// Shared selection entry point used by both the heads table and the canvas.
+// Highlights the head's table row and redraws the canvas, but deliberately does
+// NOT scroll the page: dragging a head on the canvas used to jerk the page to the
+// table row (PLAN.md task 43 amends task 11's "scrolls to its table row").
 function selectHead(id) {
   selectedHeadId = id;
   renderHeadsTable();
-  if (id) {
-    const safe = window.CSS && CSS.escape ? CSS.escape(id) : id;
-    const row = document.querySelector(`#headsTable tbody tr[data-id="${safe}"]`);
-    if (row && row.scrollIntoView) row.scrollIntoView({ block: "nearest" });
-  }
   drawYardCanvas();
+  updateEditHeadButton();
 }
 
 // Re-render every table/list from current state. Called after canvas edits commit.
@@ -80,7 +79,7 @@ function bindYardForm() {
   // Handlers read getState() live so they keep working after New/Import swaps state.
   w.addEventListener("change", () => { const y = getState().yard; y.widthFt = clamp(+w.value || 80, 5, 1000); w.value = y.widthFt; saveState(); drawYardCanvas(); });
   h.addEventListener("change", () => { const y = getState().yard; y.heightFt = clamp(+h.value || 60, 5, 1000); h.value = y.heightFt; saveState(); drawYardCanvas(); });
-  c.addEventListener("change", () => { const y = getState().yard; y.cellSizeFt = clamp(+c.value || 2, 0.5, 10); c.value = y.cellSizeFt; saveState(); });
+  c.addEventListener("change", () => { const y = getState().yard; y.cellSizeFt = clamp(+c.value || 1, 1, 10); c.value = y.cellSizeFt; saveState(); });
 }
 
 function bindYardFormValuesOnly() {
@@ -172,16 +171,28 @@ function removeZone(id) {
 
 /* --------------------------------- heads ---------------------------------- */
 
+// Sequential head ids: H1, H2, ... Scan existing /^H(\d+)$/ ids, take max+1
+// (start at 1). Legacy random-suffix ids (from uid("H")) stay valid and are just
+// skipped by the scan (PLAN.md task 34).
+function nextHeadId(state) {
+  let max = 0;
+  (state || getState()).heads.forEach((h) => {
+    const m = /^H(\d+)$/.exec(h.id);
+    if (m) max = Math.max(max, +m[1]);
+  });
+  return "H" + (max + 1);
+}
+
 function addHead(defaults) {
   const state = getState();
   const firstZone = state.sprinklerZones[0];
   const h = Object.assign({
-    id: uid("H"),
+    id: nextHeadId(state),
     sprinklerZoneId: firstZone ? firstZone.id : "sz1",
     x: Math.round(state.yard.widthFt / 2),
     y: Math.round(state.yard.heightFt / 2),
     radiusFt: 15, arcStartDeg: 0, arcEndDeg: 360, ratedGpm: 2.0,
-    nozzleFamily: "", brand: "", model: "", nozzle: "", riserHeightIn: null,
+    brand: "", model: "", nozzle: "", riserHeightIn: null,
     needsReplacement: false, notes: "",
   }, defaults || {});
   state.heads.push(h);
@@ -191,11 +202,45 @@ function addHead(defaults) {
 }
 
 function typeOptions(selected) {
-  const opts = [["", "unset"], ["rotary", "rotary"], ["fixed", "fixed"]];
+  const opts = [["", "Unset"], ["rotary", "Rotary"], ["fixed", "Fixed"]];
   return opts.map(([v, label]) => `<option value="${v}" ${(selected || "") === v ? "selected" : ""}>${label}</option>`).join("");
 }
 
+// Entry point for both head-list surfaces. Below the 700px breakpoint the heads
+// render as a card-per-head list (usable on a phone); at wider widths the full
+// 17-column table (PLAN.md task 46). CSS toggles which container is visible; we
+// render only the visible one, and onViewportChange re-invokes this on a flip.
 function renderHeadsTable() {
+  if (isNarrow()) renderHeadsCards();
+  else renderHeadsRows();
+  updateHeadTypeNudge();
+}
+
+// Shared field wiring for a single head control, used identically by the table
+// rows, the mobile cards, and the tap-to-edit modal (PLAN.md tasks 46, 48) so
+// updateHeadField / saveState / selection / structural re-render never drift.
+function attachHeadFieldHandlers(inp, h) {
+  inp.addEventListener("change", () => {
+    updateHeadField(h, inp.dataset.f, inp);
+    saveState();
+    const structural = ["sprinklerZoneId", "type", "needsReplacement"].indexOf(inp.dataset.f) !== -1;
+    if (structural) renderHeadsTable();
+    drawYardCanvas();
+    updateHeadTypeNudge();
+    renderUsage();
+  });
+  inp.addEventListener("focus", () => { selectedHeadId = h.id; drawYardCanvas(); updateEditHeadButton(); });
+}
+
+function deleteHead(id) {
+  const state = getState();
+  state.heads = state.heads.filter((x) => x.id !== id);
+  if (selectedHeadId === id) selectedHeadId = null;
+  saveState(); renderHeadsTable(); drawYardCanvas(); updateHeadTypeNudge(); renderUsage();
+  updateEditHeadButton();
+}
+
+function renderHeadsRows() {
   const state = getState();
   const tbody = document.querySelector("#headsTable tbody");
   tbody.innerHTML = "";
@@ -203,7 +248,6 @@ function renderHeadsTable() {
 
   if (state.heads.length === 0) {
     tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty">No heads yet. Click "+ Add head" to start mapping your yard.</td></tr>`;
-    updateHeadTypeNudge();
     return;
   }
 
@@ -217,14 +261,13 @@ function renderHeadsTable() {
       <td><span class="zone-swatch" style="background:${zoneColorFor(h.sprinklerZoneId)}"></span></td>
       <td><input type="text" data-f="id" value="${escapeHtml(h.id)}" style="width:60px;"></td>
       <td><select data-f="sprinklerZoneId">${zoneOpts}</select></td>
-      <td><input type="number" data-f="x" value="${h.x}" step="0.5" style="width:60px;"></td>
-      <td><input type="number" data-f="y" value="${h.y}" step="0.5" style="width:60px;"></td>
-      <td><input type="number" data-f="radiusFt" value="${h.radiusFt}" step="0.5" min="0" style="width:60px;"></td>
+      <td><select data-f="type">${typeOptions(h.type)}</select>${sanityFlagHtml(h)}</td>
+      <td><input type="number" data-f="x" value="${h.x}" step="1" style="width:60px;"></td>
+      <td><input type="number" data-f="y" value="${h.y}" step="1" style="width:60px;"></td>
+      <td><input type="number" data-f="radiusFt" value="${h.radiusFt}" step="1" min="0" style="width:60px;"></td>
       <td><input type="number" data-f="arcStartDeg" value="${h.arcStartDeg}" step="5" min="0" max="360" style="width:60px;"></td>
       <td><input type="number" data-f="arcEndDeg" value="${h.arcEndDeg}" step="5" min="0" max="360" style="width:60px;"></td>
       <td><input type="number" data-f="ratedGpm" value="${h.ratedGpm}" step="0.1" min="0" style="width:60px;"></td>
-      <td><select data-f="type">${typeOptions(h.type)}</select>${sanityFlagHtml(h)}</td>
-      <td><input type="text" data-f="nozzleFamily" value="${escapeHtml(h.nozzleFamily || "")}" style="width:100px;" placeholder="e.g. MP Rotator"></td>
       <td><input type="text" data-f="brand" value="${escapeHtml(h.brand || "")}" style="width:80px;"></td>
       <td><input type="text" data-f="model" value="${escapeHtml(h.model || "")}" style="width:80px;"></td>
       <td><input type="text" data-f="nozzle" value="${escapeHtml(h.nozzle || "")}" style="width:70px;"></td>
@@ -238,25 +281,72 @@ function renderHeadsTable() {
       if (t === "INPUT" || t === "BUTTON" || t === "SELECT") return;
       selectHead(h.id);
     });
-    tr.querySelectorAll("input,select").forEach((inp) => {
-      inp.addEventListener("change", () => {
-        updateHeadField(h, inp.dataset.f, inp);
-        saveState();
-        const structural = ["sprinklerZoneId", "type", "needsReplacement"].indexOf(inp.dataset.f) !== -1;
-        if (structural) renderHeadsTable();
-        drawYardCanvas();
-        updateHeadTypeNudge();
-        renderUsage();
-      });
-      inp.addEventListener("focus", () => { selectedHeadId = h.id; drawYardCanvas(); });
-    });
-    tr.querySelector('[data-act="del"]').addEventListener("click", () => {
-      state.heads = state.heads.filter((x) => x.id !== h.id);
-      saveState(); renderHeadsTable(); drawYardCanvas(); updateHeadTypeNudge(); renderUsage();
-    });
+    tr.querySelectorAll("input,select").forEach((inp) => attachHeadFieldHandlers(inp, h));
+    tr.querySelector('[data-act="del"]').addEventListener("click", () => deleteHead(h.id));
     tbody.appendChild(tr);
   });
-  updateHeadTypeNudge();
+}
+
+// Mobile head cards (PLAN.md task 46, decision (b)): geometry fields visible,
+// audit fields behind a native <details>More expander. Every control keeps its
+// data-f attribute and the shared attachHeadFieldHandlers wiring, so editing,
+// saving, and selection behave exactly like the table path.
+function renderHeadsCards() {
+  const state = getState();
+  const wrap = document.getElementById("headsCards");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+
+  if (state.heads.length === 0) {
+    wrap.innerHTML = `<div class="empty">No heads yet. Click "+ Add head" to start mapping your yard.</div>`;
+    return;
+  }
+
+  state.heads.forEach((h) => {
+    const card = document.createElement("div");
+    card.className = "head-card" + (h.id === selectedHeadId ? " selected" : "");
+    card.dataset.id = h.id;
+    const zoneOpts = state.sprinklerZones.map((z, i) =>
+      `<option value="${z.id}" ${z.id === h.sprinklerZoneId ? "selected" : ""}>${i + 1}</option>`).join("");
+    card.innerHTML = `
+      <div class="head-card-head">
+        <span class="zone-swatch" style="background:${zoneColorFor(h.sprinklerZoneId)}"></span>
+        <input type="text" data-f="id" value="${escapeHtml(h.id)}" class="hc-id" aria-label="Head ID">
+        <select data-f="sprinklerZoneId" class="hc-zone" aria-label="Zone">${zoneOpts}</select>
+        <button class="btn-danger btn-sm" data-act="del" aria-label="Delete head">✕</button>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Type</label><select data-f="type">${typeOptions(h.type)}</select></div>
+        <div class="field"><label>X (ft)</label><input type="number" data-f="x" value="${h.x}" step="1" inputmode="decimal"></div>
+        <div class="field"><label>Y (ft)</label><input type="number" data-f="y" value="${h.y}" step="1" inputmode="decimal"></div>
+        <div class="field"><label>Radius (ft)</label><input type="number" data-f="radiusFt" value="${h.radiusFt}" step="1" min="0" inputmode="decimal"></div>
+        <div class="field"><label>Arc start°</label><input type="number" data-f="arcStartDeg" value="${h.arcStartDeg}" step="5" min="0" max="360" inputmode="decimal"></div>
+        <div class="field"><label>Arc end°</label><input type="number" data-f="arcEndDeg" value="${h.arcEndDeg}" step="5" min="0" max="360" inputmode="decimal"></div>
+        <div class="field"><label>GPM</label><input type="number" data-f="ratedGpm" value="${h.ratedGpm}" step="0.1" min="0" inputmode="decimal"></div>
+      </div>
+      <div class="hc-flag">${sanityFlagHtml(h)}</div>
+      <details class="hc-more">
+        <summary>More</summary>
+        <div class="field-row">
+          <div class="field"><label>Brand</label><input type="text" data-f="brand" value="${escapeHtml(h.brand || "")}"></div>
+          <div class="field"><label>Model</label><input type="text" data-f="model" value="${escapeHtml(h.model || "")}"></div>
+          <div class="field"><label>Nozzle</label><input type="text" data-f="nozzle" value="${escapeHtml(h.nozzle || "")}"></div>
+          <div class="field"><label>Riser (in)</label><input type="number" data-f="riserHeightIn" value="${h.riserHeightIn == null ? "" : h.riserHeightIn}" step="1" min="0" inputmode="decimal" placeholder="-"></div>
+          <div class="field"><label>Replace?</label><input type="checkbox" data-f="needsReplacement" ${h.needsReplacement ? "checked" : ""} style="width:auto;"></div>
+          <div class="field"><label>Notes</label><input type="text" data-f="notes" value="${escapeHtml(h.notes || "")}" placeholder="e.g. corner rotor"></div>
+        </div>
+      </details>
+    `;
+    card.addEventListener("click", (e) => {
+      const t = e.target.tagName;
+      if (t === "INPUT" || t === "BUTTON" || t === "SELECT" || t === "OPTION" || t === "SUMMARY") return;
+      if (e.target.closest("summary")) return; // don't hijack the expander toggle
+      selectHead(h.id);
+    });
+    card.querySelectorAll("input,select").forEach((inp) => attachHeadFieldHandlers(inp, h));
+    card.querySelector('[data-act="del"]').addEventListener("click", (e) => { e.stopPropagation(); deleteHead(h.id); });
+    wrap.appendChild(card);
+  });
 }
 
 function updateHeadField(head, f, el) {
@@ -265,7 +355,7 @@ function updateHeadField(head, f, el) {
   else if (f === "riserHeightIn") head.riserHeightIn = el.value === "" ? null : (+el.value || 0);
   else if (f === "sprinklerZoneId") head.sprinklerZoneId = el.value;
   else if (NUMERIC_HEAD_FIELDS.indexOf(f) !== -1) head[f] = +el.value || 0;
-  else head[f] = el.value; // id, nozzleFamily, brand, model, nozzle, notes
+  else head[f] = el.value; // id, brand, model, nozzle, notes
 }
 
 // Migration nudge (PLAN.md section 3 step 3): prompt the user to set head types
@@ -297,6 +387,7 @@ function renderAreaLists() {
       <td><input type="color" data-f="color" value="${z.color || "#4caf50"}" style="width:38px; padding:2px;"></td>
       <td><input type="text" data-f="name" value="${escapeHtml(z.name || "")}" style="min-width:110px;"></td>
       <td>${z.polygon.length}</td>
+      <td>${fmt(polygonAreaSqFt(z.polygon), 0)}</td>
       <td><button class="btn-danger btn-sm" data-act="del">✕</button></td>
     `;
     tr.querySelectorAll("input").forEach((inp) => inp.addEventListener("change", () => {
@@ -316,6 +407,7 @@ function renderAreaLists() {
       <td><input type="text" data-f="label" value="${escapeHtml(d.label || "")}" style="min-width:110px;"></td>
       <td><select data-f="kind">${kindOpts}</select></td>
       <td>${d.polygon.length}</td>
+      <td>${fmt(polygonAreaSqFt(d.polygon), 0)}</td>
       <td><button class="btn-danger btn-sm" data-act="del">✕</button></td>
     `;
     tr.querySelectorAll("input,select").forEach((inp) => inp.addEventListener("change", () => {
@@ -355,6 +447,8 @@ function wireCanvasTools() {
   document.querySelectorAll("#canvasTools .mode-btn").forEach((btn) => {
     btn.addEventListener("click", () => { setMode(btn.dataset.mode); updateModeUI(); });
   });
+  const edit = document.getElementById("btnEditHead");
+  if (edit) edit.addEventListener("click", () => openEditHeadModal(selectedHeadId));
 }
 
 /* --------------------------- background controls -------------------------- */
@@ -449,6 +543,7 @@ function openScheduleModal(zoneId) {
     <div class="hint" id="schedCycles"></div>
     <div class="modal-actions">
       <button class="btn-light btn-sm" id="schedCancel">Cancel</button>
+      <button class="btn-light btn-sm" id="schedCopyAll" title="Apply this schedule to every zone at once (one-time copy)">Copy to all zones</button>
       <button class="btn-primary btn-sm" id="schedSave">Save</button>
     </div>
   `);
@@ -498,11 +593,28 @@ function openScheduleModal(zoneId) {
   detail.addEventListener("input", updateCyclesHint);
   renderDetail();
 
+  function validateCollected(sched) {
+    if (sched.mode === "days_of_week" && sched.daysOfWeek.length === 0) { alert("Pick at least one day of the week."); return false; }
+    return true;
+  }
+
   document.getElementById("schedCancel").addEventListener("click", closeModal);
   document.getElementById("schedSave").addEventListener("click", () => {
     const sched = collect();
-    if (sched.mode === "days_of_week" && sched.daysOfWeek.length === 0) { alert("Pick at least one day of the week."); return; }
+    if (!validateCollected(sched)) return;
     z.schedule = sched;
+    saveState();
+    closeModal();
+    refreshAfterModelChange();
+  });
+  // One-time copy (PLAN.md task 31): deep-copy this schedule into every zone. Not a
+  // persistent link; zones can be edited independently afterward.
+  document.getElementById("schedCopyAll").addEventListener("click", () => {
+    const sched = collect();
+    if (!validateCollected(sched)) return;
+    const zones = getState().sprinklerZones;
+    if (!confirm(`Apply this schedule to all ${zones.length} zones? This overwrites each zone's current schedule.`)) return;
+    zones.forEach((zone) => { zone.schedule = JSON.parse(JSON.stringify(sched)); });
     saveState();
     closeModal();
     refreshAfterModelChange();
@@ -537,7 +649,8 @@ function openFlowModal(zoneId) {
   function renderInputs() {
     if (method.value === "gallons") {
       inputs.innerHTML = `<div class="field-row">
-        <div class="field"><label>Gallons used</label><input type="number" id="fGallons" min="0" step="0.1"></div>
+        <div class="field"><label>Meter before</label><input type="number" id="fBefore" min="0" step="0.1"></div>
+        <div class="field"><label>Meter after</label><input type="number" id="fAfter" min="0" step="0.1"></div>
         <div class="field"><label>Over minutes</label><input type="number" id="fMin" min="0" step="0.1"></div></div>`;
     } else {
       inputs.innerHTML = `<div class="field-row">
@@ -551,8 +664,10 @@ function openFlowModal(zoneId) {
   function compute() {
     const mins = +(document.getElementById("fMin") || {}).value || 0;
     if (method.value === "gallons") {
-      const g = +(document.getElementById("fGallons") || {}).value || 0;
-      gpm = mins > 0 ? g / mins : 0;
+      const before = +(document.getElementById("fBefore") || {}).value || 0;
+      const after = +(document.getElementById("fAfter") || {}).value || 0;
+      const g = after - before; // guard against after <= before below (gpm stays 0)
+      gpm = (mins > 0 && g > 0) ? g / mins : 0;
     } else {
       const revs = +(document.getElementById("fRevs") || {}).value || 0;
       const gpr = +(document.getElementById("fGpr") || {}).value || 0;
@@ -571,6 +686,50 @@ function openFlowModal(zoneId) {
     closeModal();
     refreshAfterModelChange();
   });
+}
+
+/* --------------------------- edit-head modal (touch) --------------------- */
+
+// The "Edit head" button is the precision path promised in PLAN.md 6.7 and built
+// in task 48: only meaningful when a head is selected AND the device is coarse-
+// pointer or narrow (fingertips can't hit exact arc/radius handle pixels). Fine-
+// pointer desktop never sees it, honoring the desktop-untouched constraint.
+function updateEditHeadButton() {
+  const btn = document.getElementById("btnEditHead");
+  if (!btn) return;
+  const show = !!selectedHeadId && (isCoarse() || isNarrow());
+  btn.style.display = show ? "" : "none";
+}
+
+// Precision editor for the selected head. Edits apply live on change through the
+// exact same attachHeadFieldHandlers pipeline as the table/cards, so the single
+// action is "Close" (no OK/Cancel semantics to drift). Number inputs get
+// inputmode="decimal" for a numeric phone keyboard.
+function openEditHeadModal(headId) {
+  const state = getState();
+  const h = state.heads.find((x) => x.id === headId);
+  if (!h) return;
+  const zoneOpts = state.sprinklerZones.map((z, i) =>
+    `<option value="${z.id}" ${z.id === h.sprinklerZoneId ? "selected" : ""}>${i + 1}</option>`).join("");
+  const box = openModal(`
+    <h3>Edit head ${escapeHtml(h.id)}</h3>
+    <p class="hint">Changes apply live. Drag handles on the canvas still work for rough moves; use these fields for exact arc and radius values.</p>
+    <div class="field-row" id="editHeadFields">
+      <div class="field"><label>Zone</label><select data-f="sprinklerZoneId">${zoneOpts}</select></div>
+      <div class="field"><label>Type</label><select data-f="type">${typeOptions(h.type)}</select></div>
+      <div class="field"><label>X (ft)</label><input type="number" data-f="x" value="${h.x}" step="1" inputmode="decimal"></div>
+      <div class="field"><label>Y (ft)</label><input type="number" data-f="y" value="${h.y}" step="1" inputmode="decimal"></div>
+      <div class="field"><label>Radius (ft)</label><input type="number" data-f="radiusFt" value="${h.radiusFt}" step="1" min="0" inputmode="decimal"></div>
+      <div class="field"><label>Arc start°</label><input type="number" data-f="arcStartDeg" value="${h.arcStartDeg}" step="5" min="0" max="360" inputmode="decimal"></div>
+      <div class="field"><label>Arc end°</label><input type="number" data-f="arcEndDeg" value="${h.arcEndDeg}" step="5" min="0" max="360" inputmode="decimal"></div>
+      <div class="field"><label>GPM</label><input type="number" data-f="ratedGpm" value="${h.ratedGpm}" step="0.1" min="0" inputmode="decimal"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-primary btn-sm" id="editHeadClose">Close</button>
+    </div>
+  `);
+  box.querySelectorAll("#editHeadFields input, #editHeadFields select").forEach((inp) => attachHeadFieldHandlers(inp, h));
+  document.getElementById("editHeadClose").addEventListener("click", closeModal);
 }
 
 /* ---------------------------- head-type warnings -------------------------- */
@@ -826,7 +985,7 @@ function wireHeaderActions() {
       renderAll();
     }
   });
-  document.getElementById("btnAddHead").addEventListener("click", () => addHead({ id: uid("H") }));
+  document.getElementById("btnAddHead").addEventListener("click", () => addHead());
   document.getElementById("btnAddZone").addEventListener("click", addZone);
   document.getElementById("btnSync").addEventListener("click", openSyncModal);
   document.getElementById("firstRunDismiss").addEventListener("click", () => {
@@ -885,9 +1044,20 @@ function init() {
   }
 
   drawYardCanvas();
+  updateEditHeadButton();
   document.getElementById("saveStatus").textContent = "Loaded";
 
   window.addEventListener("resize", () => { drawYardCanvas(); redrawHeatmap(); });
+
+  // Crossing the layout (700px) or interaction (pointer) signal re-renders the
+  // affected surfaces: table<->cards, canvas height, the edit-head button
+  // (PLAN.md task 44). Same calls as the resize listener, plus the head list.
+  onViewportChange(() => {
+    renderHeadsTable();
+    drawYardCanvas();
+    redrawHeatmap();
+    updateEditHeadButton();
+  });
 
   autoPullOnLoad(); // no-op unless sync is enabled + configured
 }

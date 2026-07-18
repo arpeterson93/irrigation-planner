@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_config import validate_obj  # noqa: E402
-from migrate_v1_config import infer_head_type  # noqa: E402
+from migrate_v1_config import infer_head_type, evenly_spaced_weekdays  # noqa: E402
 
 SCHEMA_VERSION = 2
 
@@ -87,7 +87,7 @@ def build_v2(rows, yard_width, yard_height, origin):
                               if _get(r, "gpm_avail") not in (None, "") else None),
                 "runTimeMin": _num(_get(r, "run_min"), 20),
                 "weeklyTargetIn": _num(_get(r, "target_in"), 1.0),
-                "schedule": {"mode": "n_per_week", "nPerWeek": 3},
+                "schedule": {"mode": "days_of_week", "daysOfWeek": evenly_spaced_weekdays(3)},
             }
 
         y_raw = _num(_get(r, "y"))
@@ -103,7 +103,7 @@ def build_v2(rows, yard_width, yard_height, origin):
             "arcStartDeg": _num(_get(r, "arc_start")),
             "arcEndDeg": _num(_get(r, "arc_end"), 360),
             "ratedGpm": _num(_get(r, "gpm")),
-            "nozzleFamily": "", "brand": "", "model": "", "nozzle": "",
+            "brand": "", "model": "", "nozzle": "",
             "riserHeightIn": None, "needsReplacement": False,
             "notes": str(_get(r, "notes") or ""),
         }
@@ -114,7 +114,8 @@ def build_v2(rows, yard_width, yard_height, origin):
 
     sprinkler_zones = [zones[z] for z in zone_order] or [{
         "id": "sz1", "name": "Zone 1", "supplyGpm": 10, "runTimeMin": 20,
-        "weeklyTargetIn": 1.0, "schedule": {"mode": "n_per_week", "nPerWeek": 3},
+        "weeklyTargetIn": 1.0,
+        "schedule": {"mode": "days_of_week", "daysOfWeek": evenly_spaced_weekdays(3)},
     }]
 
     return {

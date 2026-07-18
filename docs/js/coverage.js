@@ -133,6 +133,17 @@ export function computeCoverage() {
   return { rows, cols, cell, grid, weeklyGrid, zoneGrids, zoneCycles, factors, deadMask, ms: t1 - t0 };
 }
 
+// Shoelace area of a polygon in square feet (PLAN.md task 36). `polygon` is a
+// list of [x,y] yard-feet vertices; winding direction is irrelevant (abs value).
+export function polygonAreaSqFt(polygon) {
+  if (!polygon || polygon.length < 3) return 0;
+  let a = 0;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    a += (polygon[j][0] + polygon[i][0]) * (polygon[j][1] - polygon[i][1]);
+  }
+  return Math.abs(a) / 2;
+}
+
 export function pointInPolygon(pt, poly) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
