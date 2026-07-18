@@ -25,8 +25,14 @@ def clamp(v, a, b):
     return max(a, min(b, v))
 
 
+def evenly_spaced_weekdays(n):
+    """N weekdays evenly spaced starting Monday (Mon=0..Sun=6). N=3 -> [0,2,5]."""
+    spacing = 7 / n
+    return sorted({round(i * spacing) % 7 for i in range(int(n))})
+
+
 def cycles_to_schedule(value):
-    """v1 raw cycles-per-week number -> schema v2 schedule (PLAN.md 3, step 4)."""
+    """v1 raw cycles-per-week number -> schema v2 schedule (four-mode model)."""
     try:
         v = float(value)
     except (TypeError, ValueError):
@@ -37,7 +43,7 @@ def cycles_to_schedule(value):
         # No source for odd-vs-even in v1; default odd and flag for the UI.
         return {"mode": "odd_even", "oddEvenChoice": "odd", "_needsOddEvenChoice": True}
     n = int(clamp(round(v) or 3, 1, 7))
-    return {"mode": "n_per_week", "nPerWeek": n}
+    return {"mode": "days_of_week", "daysOfWeek": evenly_spaced_weekdays(n)}
 
 
 def infer_head_type(notes):

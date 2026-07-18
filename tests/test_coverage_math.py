@@ -99,15 +99,31 @@ class TestHeadPrecipRate:
         assert round(session_in, 2) == pytest.approx(case["sheetReportedSessionWaterIn"], abs=0.005)
 
 
-class TestEffectiveGpm:
-    """
-    Placeholder for Phase 3's proportional-supply-limited GPM fix (see PLAN.md section 3).
-    effectiveGpm = ratedGpm * (supplyGpm / totalRatedGpmInZone) when supply is the limiting
-    factor, otherwise effectiveGpm = ratedGpm. No golden values exist yet because this
-    behavior does not exist in the v1 legacy file. Add real cases here when coverage.js
-    implements it in Phase 3, and remove this skip.
-    """
+def effective_gpm(rated, supply, zone_total):
+    """Phase 3 supply-limited scaling. Twin of coverage.js zoneScaleFactor/effectiveGpm."""
+    if supply is not None and supply > 0 and zone_total > 0 and supply < zone_total:
+        return rated * (supply / zone_total)
+    return rated
 
-    @pytest.mark.skip(reason="effective-GPM proportional scaling lands in Phase 3")
-    def test_effective_gpm_scales_down_when_supply_limited(self):
-        raise NotImplementedError
+
+class TestEffectiveGpm:
+    @pytest.mark.parametrize("case", GOLDEN["effective_gpm_cases"], ids=lambda c: c["label"])
+    def test_factor_and_effective_gpm(self, case):
+        eff = effective_gpm(case["ratedGpm"], case["supplyGpm"], case["zoneRatedTotalGpm"])
+        assert eff == pytest.approx(case["expectedEffectiveGpm"])
+        factor = eff / case["ratedGpm"]
+        assert factor == pytest.approx(case["expectedFactor"])
+
+    @pytest.mark.parametrize(
+        "case",
+        [c for c in GOLDEN["effective_gpm_cases"] if "expectedPrecipRateInHr" in c],
+        ids=lambda c: c["label"],
+    )
+    def test_precip_rate_uses_effective_gpm(self, case):
+        eff = effective_gpm(case["ratedGpm"], case["supplyGpm"], case["zoneRatedTotalGpm"])
+        rate = head_precip_rate_in_hr(eff, case["radiusFt"], case["arcStartDeg"], case["arcEndDeg"])
+        assert rate == pytest.approx(case["expectedPrecipRateInHr"], rel=1e-3)
+
+    def test_supply_limited_is_strictly_less_than_rated(self):
+        eff = effective_gpm(3.0, 4.5, 6.0)
+        assert eff < 3.0

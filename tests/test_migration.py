@@ -70,10 +70,11 @@ class TestFieldRenames:
 
 
 class TestScheduleDerivation:
-    def test_watering_days_3_becomes_n_per_week(self, v2):
+    def test_watering_days_3_becomes_days_of_week(self, v2):
+        # wateringDays=3 -> 3 evenly-spaced weekdays from Monday ([0,2,5]).
         for z in v2["sprinklerZones"]:
-            assert z["schedule"]["mode"] == "n_per_week"
-            assert z["schedule"]["nPerWeek"] == 3
+            assert z["schedule"]["mode"] == "days_of_week"
+            assert z["schedule"]["daysOfWeek"] == [0, 2, 5]
 
     def test_seven_maps_to_every_day(self):
         assert cycles_to_schedule(7) == {"mode": "every_day"}

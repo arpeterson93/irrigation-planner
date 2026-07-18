@@ -53,8 +53,28 @@ export function defaultSync() {
   return { enabled: false, endpointUrl: null, userKey: null, lastSyncedAt: null };
 }
 export function defaultSchedule() {
-  // Mirrors v1's default cycles-per-week of 3 (see migration note below).
-  return { mode: "n_per_week", nPerWeek: 3 };
+  // Mirrors v1's default cycles-per-week of 3 (Mon/Wed/Fri).
+  return { mode: "days_of_week", daysOfWeek: [0, 2, 4] };
+}
+
+// N weekdays evenly spaced starting Monday (Mon=0..Sun=6). N=3 -> [0,2,5].
+export function evenlySpacedWeekdays(n) {
+  const set = new Set();
+  const spacing = 7 / n;
+  for (let i = 0; i < Math.floor(n); i++) set.add(Math.round(i * spacing) % 7);
+  return Array.from(set).sort((a, b) => a - b);
+}
+
+// Coerce any older/legacy schedule shape (e.g. the interim n_per_week) into the
+// current four-mode model, so saved v2 blobs from earlier dev keep loading.
+export function normalizeSchedule(s) {
+  if (!s || !s.mode) return defaultSchedule();
+  if (s.mode === "n_per_week") {
+    const days = Array.isArray(s.daysOfWeek) && s.daysOfWeek.length
+      ? s.daysOfWeek : evenlySpacedWeekdays(clamp(Math.round(s.nPerWeek) || 3, 1, 7));
+    return { mode: "days_of_week", daysOfWeek: days };
+  }
+  return s;
 }
 
 export function makeZone(index) {
@@ -107,7 +127,7 @@ export function cyclesToSchedule(value) {
   if (v === 7) return { mode: "every_day" };
   if (v === 3.5) return { mode: "odd_even", oddEvenChoice: "odd", _needsOddEvenChoice: true };
   const n = clamp(Math.round(v) || 3, 1, 7);
-  return { mode: "n_per_week", nPerWeek: n };
+  return { mode: "days_of_week", daysOfWeek: evenlySpacedWeekdays(n) };
 }
 
 // Best-effort head type from v1 free-text notes. PLAN.md section 3 step 3 says
@@ -199,7 +219,8 @@ export function normalizeV2(raw) {
   out.schemaVersion = SCHEMA_VERSION;
   out.yard = Object.assign({ cellSizeFt: 2 }, d.yard, raw.yard || {});
   out.sprinklerZones = Array.isArray(raw.sprinklerZones) && raw.sprinklerZones.length
-    ? raw.sprinklerZones : d.sprinklerZones;
+    ? raw.sprinklerZones.map((z) => Object.assign({}, z, { schedule: normalizeSchedule(z.schedule) }))
+    : d.sprinklerZones;
   out.yardZones = Array.isArray(raw.yardZones) ? raw.yardZones : [];
   out.deadSpaces = Array.isArray(raw.deadSpaces) ? raw.deadSpaces : [];
   out.heads = Array.isArray(raw.heads) ? raw.heads : [];

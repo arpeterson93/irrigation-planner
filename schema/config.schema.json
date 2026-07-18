@@ -38,13 +38,14 @@
             "required": ["mode"],
             "additionalProperties": true,
             "properties": {
-              "mode": { "enum": ["every_day", "odd_even", "n_per_week"] },
+              "mode": { "enum": ["every_day", "odd_even", "days_of_week", "interval"] },
               "oddEvenChoice": { "enum": ["odd", "even"] },
-              "nPerWeek": { "type": "number", "minimum": 1, "maximum": 7 },
               "daysOfWeek": {
                 "type": "array",
                 "items": { "type": "integer", "minimum": 0, "maximum": 6 }
-              }
+              },
+              "intervalDays": { "type": "integer", "minimum": 1, "maximum": 30 },
+              "anchorDate": { "type": "string" }
             },
             "allOf": [
               {
@@ -52,8 +53,12 @@
                 "then": { "required": ["oddEvenChoice"] }
               },
               {
-                "if": { "properties": { "mode": { "const": "n_per_week" } } },
-                "then": { "required": ["nPerWeek"] }
+                "if": { "properties": { "mode": { "const": "days_of_week" } } },
+                "then": { "required": ["daysOfWeek"] }
+              },
+              {
+                "if": { "properties": { "mode": { "const": "interval" } } },
+                "then": { "required": ["intervalDays"] }
               }
             ]
           }

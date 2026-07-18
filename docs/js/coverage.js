@@ -12,6 +12,7 @@
  * ========================================================================== */
 
 import { getState, zoneById } from "./state.js";
+import { effectiveCyclesPerWeek } from "./schedule.js";
 
 export function norm360(a) { return ((a % 360) + 360) % 360; }
 
@@ -35,9 +36,29 @@ export function headArea(head) {
 
 // Precipitation rate for a head, in/hr: 96.3 * GPM / sector area (sq ft).
 export function headPrecipRate(head) {
+  return headPrecipRateFor(head, head.ratedGpm);
+}
+export function headPrecipRateFor(head, gpm) {
   const area = headArea(head);
   if (area <= 0) return 0;
-  return 96.3 * head.ratedGpm / area;
+  return 96.3 * gpm / area;
+}
+
+/* --------------------- effective GPM (supply-limited) --------------------- */
+// PLAN.md section 3: if a zone's measured supply is less than the sum of its
+// heads' rated GPM, every head is scaled down proportionally so the zone's
+// delivered flow matches the supply. Otherwise heads run at their rated GPM.
+
+export function zoneRatedGpm(headsInZone) {
+  return headsInZone.reduce((s, h) => s + (Number(h.ratedGpm) || 0), 0);
+}
+export function zoneScaleFactor(zone, headsInZone) {
+  const R = zoneRatedGpm(headsInZone);
+  if (zone.supplyGpm != null && zone.supplyGpm > 0 && R > 0 && zone.supplyGpm < R) return zone.supplyGpm / R;
+  return 1;
+}
+export function effectiveGpm(head, factor) {
+  return (Number(head.ratedGpm) || 0) * factor;
 }
 
 // Bearing (0 = North = +y, clockwise) from head to a point, in yard (y-up) space.
@@ -55,12 +76,25 @@ export function computeCoverage() {
   // grid[r][c] = total inches per cycle (all zones). r indexes the y band,
   // r = 0 at the BOTTOM (y-up); canvas.js flips it for the screen.
   const grid = Array.from({ length: rows }, () => new Array(cols).fill(0));
+  const weeklyGrid = Array.from({ length: rows }, () => new Array(cols).fill(0));
   const zoneGrids = {};
+  const zoneCycles = {};
   state.sprinklerZones.forEach((z) => {
     zoneGrids[z.id] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+    zoneCycles[z.id] = effectiveCyclesPerWeek(z.schedule);
   });
 
-  const headMeta = state.heads.map((h) => ({ h, rate: headPrecipRate(h) }));
+  // Precompute each head's effective (supply-scaled) precip rate.
+  const headsByZone = {};
+  state.sprinklerZones.forEach((z) => (headsByZone[z.id] = []));
+  state.heads.forEach((h) => { if (headsByZone[h.sprinklerZoneId]) headsByZone[h.sprinklerZoneId].push(h); });
+  const factors = {};
+  state.sprinklerZones.forEach((z) => (factors[z.id] = zoneScaleFactor(z, headsByZone[z.id])));
+
+  const headMeta = state.heads.map((h) => {
+    const f = factors[h.sprinklerZoneId] != null ? factors[h.sprinklerZoneId] : 1;
+    return { h, rate: headPrecipRateFor(h, effectiveGpm(h, f)) };
+  });
 
   for (let r = 0; r < rows; r++) {
     const cy = (r + 0.5) * cell;
@@ -69,31 +103,74 @@ export function computeCoverage() {
       for (const { h, rate } of headMeta) {
         if (rate <= 0) continue;
         const dx = cx - h.x, dy = cy - h.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist > h.radiusFt) continue;
-        const bearing = bearingTo(dx, dy);
-        if (!angleInArc(bearing, h.arcStartDeg, h.arcEndDeg)) continue;
+        if (Math.hypot(dx, dy) > h.radiusFt) continue;
+        if (!angleInArc(bearingTo(dx, dy), h.arcStartDeg, h.arcEndDeg)) continue;
         const z = zoneById(h.sprinklerZoneId);
         const inchesThisCycle = rate * ((z ? z.runTimeMin : 0) / 60);
-        if (zoneGrids[h.sprinklerZoneId]) zoneGrids[h.sprinklerZoneId][r][c] += inchesThisCycle;
+        if (zoneGrids[h.sprinklerZoneId]) {
+          zoneGrids[h.sprinklerZoneId][r][c] += inchesThisCycle;
+          weeklyGrid[r][c] += inchesThisCycle * (zoneCycles[h.sprinklerZoneId] || 0);
+        }
         grid[r][c] += inchesThisCycle;
       }
     }
   }
 
+  // Dead-space mask: a cell whose center falls in any dead-space polygon is
+  // excluded from turf stats and drawn neutral/hatched (PLAN.md task 16).
+  const deadMask = Array.from({ length: rows }, () => new Array(cols).fill(false));
+  if (state.deadSpaces.length) {
+    for (let r = 0; r < rows; r++) {
+      const cy = (r + 0.5) * cell;
+      for (let c = 0; c < cols; c++) {
+        const cx = (c + 0.5) * cell;
+        deadMask[r][c] = state.deadSpaces.some((d) => pointInPolygon([cx, cy], d.polygon));
+      }
+    }
+  }
+
   const t1 = performance.now();
-  return { rows, cols, cell, grid, zoneGrids, ms: t1 - t0 };
+  return { rows, cols, cell, grid, weeklyGrid, zoneGrids, zoneCycles, factors, deadMask, ms: t1 - t0 };
 }
 
-export function statsFromGrid(gridArr, cellArea, cyclesPerWeek) {
+export function pointInPolygon(pt, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    const hit = ((yi > pt[1]) !== (yj > pt[1])) &&
+      (pt[0] < (xj - xi) * (pt[1] - yi) / ((yj - yi) || 1e-12) + xi);
+    if (hit) inside = !inside;
+  }
+  return inside;
+}
+
+// Stats over the cells selected by includeFn(r,c). Returns per-cycle summary.
+export function statsOverCells(grid, cell, includeFn) {
   const vals = [];
-  for (const row of gridArr) for (const v of row) if (v > 1e-6) vals.push(v);
-  if (vals.length === 0) return { min: 0, med: 0, max: 0, avg: 0, sqft: 0, avgWeekly: 0 };
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      if (!includeFn(r, c)) continue;
+      const v = grid[r][c];
+      if (v > 1e-6) vals.push(v);
+    }
+  }
+  if (!vals.length) return { min: 0, med: 0, max: 0, avg: 0, sqft: 0, count: 0 };
   vals.sort((a, b) => a - b);
-  const min = vals[0], max = vals[vals.length - 1];
-  const med = vals[Math.floor(vals.length / 2)];
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-  return { min, med, max, avg, sqft: vals.length * cellArea, avgWeekly: avg * cyclesPerWeek };
+  return { min: vals[0], med: vals[Math.floor(vals.length / 2)], max: vals[vals.length - 1], avg, sqft: vals.length * cell * cell, count: vals.length };
+}
+
+// Average of a grid over selected cells (used for weekly rollups; includes zeros
+// among covered cells is avoided by only averaging cells that received water).
+export function avgOverCells(grid, includeFn) {
+  let sum = 0, n = 0;
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      if (!includeFn(r, c)) continue;
+      if (grid[r][c] > 1e-6) { sum += grid[r][c]; n++; }
+    }
+  }
+  return n ? sum / n : 0;
 }
 
 /* ------------------------------ heat colors ------------------------------- */

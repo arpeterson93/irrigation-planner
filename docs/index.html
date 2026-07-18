@@ -22,6 +22,7 @@
     <button class="btn-ghost" id="btnExport">Export JSON</button>
     <button class="btn-ghost" id="btnImportTrigger">Import JSON</button>
     <input type="file" id="btnImport" accept="application/json">
+    <button class="btn-ghost" id="btnSync">Sync</button>
   </div>
 </header>
 
@@ -36,6 +37,10 @@
 
   <!-- ===================== TAB: YARD & HEADS ===================== -->
   <section class="tabpanel active" id="tab-yard">
+    <div class="first-run" id="firstRunHint" style="display:none;">
+      <span>New here? For an accurate layout, scroll down to <b>Background reference image</b>, upload a satellite screenshot of your lot, and use <b>Calibrate scale</b> (click two points a known distance apart). Then trace your heads on top. Or just click <b>+ Add head</b> to start from a blank grid.</span>
+      <button class="btn-light btn-sm" id="firstRunDismiss">Got it</button>
+    </div>
     <div class="card" style="margin-bottom:18px;">
       <h2>Yard dimensions</h2>
       <p class="hint">Set the bounding box of your yard in feet, then place heads using X/Y feet from the bottom-left corner. Keep it simple; you don't need to be exact, just consistent.</p>
@@ -57,7 +62,7 @@
         <div class="table-wrap">
           <table id="zoneTable">
             <thead><tr>
-              <th>Zone</th><th>Name</th><th>Run time (min)</th><th>Target (in/wk)</th><th>Available GPM</th><th></th>
+              <th>Zone</th><th>Name</th><th>Run time (min)</th><th>Target (in/wk)</th><th>Supply GPM</th><th>Schedule</th><th>Flow</th><th></th>
             </tr></thead>
             <tbody></tbody>
           </table>
@@ -66,18 +71,36 @@
 
       <div class="card">
         <h2>Yard preview</h2>
-        <p class="hint">Colored wedges show each head's spray pattern. Click a head row to highlight it here. Heads flagged "needs replacement" get an amber ring.</p>
+        <p class="hint">Drag a head to move it; select one to get radius and arc handles. Hold Alt while dragging for free (unsnapped) movement.</p>
+        <div class="toolbar mode-toolbar" id="canvasTools" style="margin-bottom:8px;">
+          <button class="btn-light btn-sm mode-btn active" data-mode="select">Move</button>
+          <button class="btn-light btn-sm mode-btn" data-mode="yardzone">+ Yard zone</button>
+          <button class="btn-light btn-sm mode-btn" data-mode="deadspace">+ Dead space</button>
+          <button class="btn-light btn-sm mode-btn" data-mode="calibrate">Calibrate scale</button>
+          <button class="btn-light btn-sm mode-btn" data-mode="bgmove">Move image</button>
+        </div>
+        <div class="hint" id="canvasHint" style="margin-bottom:8px;"></div>
         <div class="canvas-wrap">
           <canvas id="yardCanvas" height="480"></canvas>
           <div class="canvas-tip" id="yardTip"></div>
         </div>
-        <div class="toolbar" style="margin-top:12px; margin-bottom:0;">
+        <div class="toolbar" style="margin-top:12px;">
           <label style="display:flex; align-items:center; gap:6px; font-weight:600; font-size:12.5px;">
             <input type="checkbox" id="toggleGrid" checked style="width:auto;"> Show grid
           </label>
           <label style="display:flex; align-items:center; gap:6px; font-weight:600; font-size:12.5px;">
             <input type="checkbox" id="toggleRadius" checked style="width:auto;"> Show full radius circle
           </label>
+        </div>
+        <div class="divider"></div>
+        <h3>Background reference image</h3>
+        <p class="hint">Load a satellite screenshot of your lot, set its scale with the two-point calibration, then trace heads and areas on top. The image stays on this device only (never uploaded, never cloud-synced).</p>
+        <div class="toolbar" style="margin-bottom:0; align-items:center;">
+          <button class="btn-light btn-sm" id="btnBgUpload">Upload image</button>
+          <input type="file" id="bgFile" accept="image/*">
+          <label style="min-width:150px;">Opacity <input type="range" id="bgOpacity" min="0" max="1" step="0.05" value="0.5"></label>
+          <div class="field" style="margin-bottom:0; min-width:90px;"><label>Rotation°</label><input type="number" id="bgRotation" step="1" value="0"></div>
+          <button class="btn-danger btn-sm" id="btnBgRemove">Remove image</button>
         </div>
       </div>
     </div>
@@ -91,6 +114,7 @@
       <div class="hint" id="headTypeNudge" style="display:none; color:var(--amber-500); font-weight:600;">
         Some heads don't have a type set yet. Set each head to rotary or fixed; it drives the coverage warnings.
       </div>
+      <div class="warn-banner" id="headWarnings" style="display:none;"></div>
       <div class="table-wrap" id="headsTableWrap">
         <table id="headsTable">
           <thead><tr>
@@ -100,6 +124,32 @@
           </tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:18px;">
+      <div class="card">
+        <h2>Yard zones <span class="muted" style="font-weight:400;">(informal areas)</span></h2>
+        <p class="hint">Free-form areas independent of valve wiring (e.g. "Front lawn"), used for grouping coverage stats. Draw one with the "+ Yard zone" tool on the preview.</p>
+        <div class="table-wrap">
+          <table id="yardZoneTable">
+            <thead><tr><th>Color</th><th>Name</th><th>Vertices</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="empty" id="yardZoneEmpty" style="display:none;">No yard zones yet. Use the "+ Yard zone" tool above the preview.</div>
+      </div>
+
+      <div class="card">
+        <h2>Dead spaces <span class="muted" style="font-weight:400;">(excluded from turf)</span></h2>
+        <p class="hint">Areas that should not count as watered turf (house, patio, driveway, beds). Draw one with the "+ Dead space" tool on the preview; they render hatched.</p>
+        <div class="table-wrap">
+          <table id="deadSpaceTable">
+            <thead><tr><th>Label</th><th>Kind</th><th>Vertices</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="empty" id="deadSpaceEmpty" style="display:none;">No dead spaces yet. Use the "+ Dead space" tool above the preview.</div>
       </div>
     </div>
   </section>
@@ -113,8 +163,8 @@
           <select id="coverageZoneFilter"><option value="all">All zones (one full cycle)</option></select>
         </div>
         <div class="field">
-          <label>Cycles per week</label>
-          <input type="number" id="cyclesPerWeek" min="1" max="14" step="1" value="3">
+          <label>Group summary by</label>
+          <select id="summaryGroupBy"><option value="sprinkler">Sprinkler zone</option><option value="yard">Yard zone</option></select>
         </div>
         <button class="btn-primary" id="btnRecompute">Recompute coverage</button>
         <span class="pill" id="computeTime"></span>
@@ -148,57 +198,42 @@
         <div class="stat-row" id="systemStats"></div>
       </div>
     </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h2>Water usage estimate</h2>
+      <p class="hint">Gallons delivered per zone and total, from each zone's delivered flow (capped at its measured supply), run time, and effective cycles per week. Gallons only; a cost estimate can be layered on later.</p>
+      <div class="table-wrap">
+        <table id="usageTable">
+          <thead><tr><th>Zone</th><th>Flow (GPM)</th><th>Cycles/wk</th><th>Gal / week</th><th>Gal / month</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 
   <!-- ===================== TAB: FORECAST ===================== -->
   <section class="tabpanel" id="tab-forecast">
-    <div class="grid cols-2">
-      <div class="card">
-        <h2>Location</h2>
-        <p class="hint">Pulls a live rainfall forecast from the National Weather Service (api.weather.gov, free, no key required) and estimates reference evapotranspiration (ET₀) from the forecasted high/low temperatures at your latitude.</p>
-        <div class="field-row">
-          <div class="field"><label>Latitude</label><input type="text" id="lat" placeholder="e.g. 39.7456"></div>
-          <div class="field"><label>Longitude</label><input type="text" id="lon" placeholder="e.g. -97.0892"></div>
-        </div>
-        <button class="btn-light btn-sm" id="btnGeolocate">📍 Use my location</button>
-        <div class="divider"></div>
-        <div class="field-row">
-          <div class="field"><label>Rain window</label>
-            <select id="rainWindow"><option value="24">Next 24 hrs</option><option value="48" selected>Next 48 hrs</option><option value="72">Next 72 hrs</option></select>
-          </div>
-          <div class="field"><label>Runoff / uptake efficiency (%)</label><input type="number" id="runoffEff" min="10" max="100" step="5" value="80"></div>
-        </div>
-        <button class="btn-primary" id="btnFetchForecast">Fetch forecast</button>
-        <span class="pill" id="forecastStatus" style="display:none;"></span>
+    <div class="card" style="margin-bottom:18px;">
+      <h2>Location &amp; settings</h2>
+      <p class="hint">Pulls a live 7-day forecast from the National Weather Service (api.weather.gov, free, no key required) and estimates daily reference evapotranspiration (ET₀) with the Hargreaves-Samani method from the forecasted highs/lows at your latitude. Baseline watering need and suggested run times are derived automatically from each zone's weekly target and schedule.</p>
+      <div class="field-row">
+        <div class="field"><label>Latitude</label><input type="text" id="lat" placeholder="e.g. 39.7456"></div>
+        <div class="field"><label>Longitude</label><input type="text" id="lon" placeholder="e.g. -97.0892"></div>
+        <div class="field"><label>Runoff / uptake efficiency (%)</label><input type="number" id="runoffEff" min="10" max="100" step="5" value="80"></div>
+        <div class="field"><label>Show adjustments for</label><select id="forecastZone"></select></div>
       </div>
-
-      <div class="card">
-        <h2>Adjustment inputs</h2>
-        <p class="hint">Baseline is the "100%" daily watering need for your area at peak season, used to scale the % adjustment. Default is derived from your zone targets, but override it if you have a better local reference (e.g. a CIMIS/ET station).</p>
-        <div class="field-row">
-          <div class="field"><label>Watering days / week</label><input type="number" id="wateringDays" min="1" max="7" step="1" value="3"></div>
-          <div class="field"><label>Baseline daily need (in)</label><input type="number" id="baselineDaily" min="0.01" max="2" step="0.01"></div>
-        </div>
-        <div class="field">
-          <label>ET₀ override (in) <span class="muted" style="font-weight:400;">(leave blank to use the Hargreaves estimate)</span></label>
-          <input type="number" id="etOverride" min="0" max="1" step="0.01" placeholder="auto">
-        </div>
+      <div class="toolbar" style="margin-bottom:0; align-items:center;">
+        <button class="btn-light btn-sm" id="btnGeolocate">📍 Use my location</button>
+        <button class="btn-primary" id="btnFetchForecast">Fetch 7-day forecast</button>
+        <span class="pill" id="forecastStatus" style="display:none;"></span>
       </div>
     </div>
 
-    <div class="card" style="margin-top:18px;" id="forecastResultCard">
-      <h2>Result</h2>
-      <div id="forecastEmpty" class="empty">Fetch a forecast to see today's suggested adjustment.</div>
+    <div class="card" id="forecastResultCard">
+      <h2>7-day outlook <span class="muted" style="font-weight:400; font-size:12px;">(today on the left)</span></h2>
+      <div id="forecastEmpty" class="empty">Fetch a forecast to see the day-by-day watering guidance.</div>
       <div id="forecastResult" style="display:none;">
-        <div class="stat-row" id="forecastStats"></div>
-        <div class="divider"></div>
-        <h3>Suggested run times</h3>
-        <div class="table-wrap">
-          <table id="adjustedTable">
-            <thead><tr><th>Zone</th><th>Base run time</th><th>Adjustment</th><th>Suggested run time</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <div class="table-wrap"><table id="forecastTable"></table></div>
         <p class="hint" style="margin-top:12px; margin-bottom:0;" id="forecastNote"></p>
       </div>
     </div>
@@ -222,6 +257,10 @@
   </section>
 
 </main>
+
+<div id="modalOverlay" class="modal-overlay" style="display:none;">
+  <div class="modal" id="modalBox"></div>
+</div>
 
 <footer>Sprinkler Simulator: a hobbyist irrigation coverage and seasonal-adjustment tool. Not a substitute for a professional irrigation audit.</footer>
 

@@ -122,3 +122,44 @@ code{background:var(--ink-100); padding:1px 5px; border-radius:4px; font-size:11
 .zone-controls{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;}
 .needs-replace-flag{color:var(--amber-500); font-weight:700;}
 td.replace-cell{text-align:center;}
+
+/* --- Phase 6 additions --- */
+.first-run{
+  display:flex; align-items:center; gap:14px; justify-content:space-between;
+  background:var(--green-100); border:1px solid #bfe0cc; color:var(--green-900);
+  border-radius:var(--radius); padding:12px 16px; margin-bottom:18px; font-size:13px; line-height:1.5;
+}
+.first-run button{flex-shrink:0;}
+
+/* --- Phase 3 additions --- */
+.warn-banner{
+  background:#fdf2e2; border:1px solid #f0d8a8; color:#8a5a12; border-radius:8px;
+  padding:8px 12px; font-size:12.5px; line-height:1.5; margin:0 0 12px;
+}
+.warn-banner ul{margin:4px 0 0; padding-left:18px;}
+.sanity-flag{color:var(--amber-500); font-weight:700; cursor:help;}
+.schedule-cell{white-space:nowrap;}
+.modal-overlay{
+  position:fixed; inset:0; background:rgba(15,30,22,.45); z-index:50;
+  display:flex; align-items:center; justify-content:center; padding:20px;
+}
+.modal{
+  background:var(--card); border-radius:var(--radius); box-shadow:0 10px 40px rgba(0,0,0,.25);
+  max-width:460px; width:100%; max-height:90vh; overflow:auto; padding:20px 22px;
+}
+.modal h3{margin-top:0;}
+.modal .modal-actions{display:flex; gap:8px; justify-content:flex-end; margin-top:16px;}
+.dow-row{display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;}
+.dow-row label{display:flex; align-items:center; gap:4px; font-weight:600; font-size:12px;}
+.dow-row input{width:auto;}
+.calc-out{font-size:20px; font-weight:700; color:var(--green-700); margin:10px 0;}
+#forecastTable td:first-child, #forecastTable th:first-child{font-weight:650; color:var(--ink-700);}
+#forecastTable .dim{opacity:.55;}
+.cell-muted{color:var(--ink-300); font-style:italic;}
+
+/* --- Phase 2 additions --- */
+#yardCanvas{touch-action:none;}
+.mode-toolbar{gap:6px;}
+.mode-btn.active{background:var(--green-500); color:#fff; border-color:var(--green-500);}
+input[type=range]{width:90px; vertical-align:middle;}
+input[type=color]{height:28px; border:1px solid var(--border); border-radius:6px; background:#fff; cursor:pointer;}

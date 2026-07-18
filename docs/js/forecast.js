@@ -1,19 +1,21 @@
 /* =============================================================================
- * forecast.js - NWS forecast fetch, Hargreaves-Samani ET0, and the seasonal
- * adjustment result.
+ * forecast.js - NWS 7-day forecast, Hargreaves-Samani ET0, and the day-by-day
+ * seasonal-adjustment table (PLAN.md Phase 4, tasks 20-22).
  *
- * hargreavesET0 + the adjustment math are the JS twins of
- * tests/test_forecast_math.py. Keep them in sync with that file.
+ * hargreavesET0 is the JS twin of tests/test_forecast_math.py; keep them in sync.
  *
- * Phase 1 scope: this preserves v1's single-shot "today's adjustment" behavior,
- * re-pointed at the v2 forecast fields (latitude/longitude/efficiencyPct - the
- * last now expressed and shown as a percent per schema v2). The full day-by-day
- * 7-day table, auto-derived per-zone baseline, and live run-time single-sourcing
- * are Phase 4 (tasks 20-22). rainWindow / wateringDays / baseline / etOverride are
- * kept working as forecast-local fields so nothing regresses in the meantime.
+ * Everything downstream is derived, not manually entered:
+ *   - baseline daily need   = zone.weeklyTargetIn / effectiveCyclesPerWeek(schedule)
+ *   - net need (per day)     = ET0 - rain * efficiency
+ *   - adjustment %           = clamp(netNeed / baseline, 0, 1.5)
+ *   - suggested run time      = round(zone.runTimeMin * adjustment%)   [live from the zone]
+ * Adjustment/run-time are shown only on that zone's scheduled watering days; other
+ * days read "no watering". Days 5-7 are visually de-emphasized (note 6.5).
  * ========================================================================== */
 
-import { getState, saveState, clamp, fmt, escapeHtml, zoneColorFor } from "./state.js";
+import { getState, saveState, clamp, fmt, escapeHtml } from "./state.js";
+import { zoneById } from "./state.js";
+import { effectiveCyclesPerWeek, isScheduledDay } from "./schedule.js";
 
 let lastForecast = null;
 
@@ -21,41 +23,32 @@ let lastForecast = null;
 
 export function bindForecastForm() {
   bindForecastFormValuesOnly();
-  const fc0 = getState().forecast;
-  setVal("rainWindow", fc0.rainWindow || 48);
-  setVal("runoffEff", fc0.efficiencyPct != null ? fc0.efficiencyPct : 80);
-  setVal("wateringDays", fc0.wateringDays || 3);
-  setVal("etOverride", fc0.etOverride != null ? fc0.etOverride : "");
-
-  // Handlers read getState().forecast live so they survive a New/Import state swap.
   onChange("lat", (v) => { getState().forecast.latitude = parseNum(v); saveState(); });
   onChange("lon", (v) => { getState().forecast.longitude = parseNum(v); saveState(); });
-  onChange("rainWindow", (v) => { getState().forecast.rainWindow = +v; saveState(); });
-  onChange("runoffEff", (v) => { getState().forecast.efficiencyPct = +v; saveState(); });
-  onChange("wateringDays", (v) => { getState().forecast.wateringDays = +v; saveState(); if (lastForecast) renderForecastResult(lastForecast); });
-  onChange("baselineDaily", (v) => { getState().forecast.baselineDaily = +v || null; saveState(); if (lastForecast) renderForecastResult(lastForecast); });
-  onChange("etOverride", (v) => { getState().forecast.etOverride = v === "" ? null : +v; saveState(); if (lastForecast) renderForecastResult(lastForecast); });
+  onChange("runoffEff", (v) => { getState().forecast.efficiencyPct = +v; saveState(); if (lastForecast) renderForecast(); });
+  onChange("forecastZone", () => { if (lastForecast) renderForecast(); });
 }
 
 export function bindForecastFormValuesOnly() {
   const fc = getState().forecast;
   setVal("lat", fc.latitude != null ? fc.latitude : "");
   setVal("lon", fc.longitude != null ? fc.longitude : "");
-  setVal("baselineDaily", fc.baselineDaily != null ? fc.baselineDaily : defaultBaselineDaily());
+  setVal("runoffEff", fc.efficiencyPct != null ? fc.efficiencyPct : 80);
+  populateForecastZones();
+}
+
+export function populateForecastZones() {
+  const sel = document.getElementById("forecastZone");
+  if (!sel) return;
+  const prev = sel.value;
+  const zones = getState().sprinklerZones;
+  sel.innerHTML = zones.map((z, i) => `<option value="${z.id}">Zone ${i + 1}: ${escapeHtml(z.name)}</option>`).join("");
+  if (zones.some((z) => z.id === prev)) sel.value = prev;
 }
 
 function setVal(id, v) { const el = document.getElementById(id); if (el) el.value = v; }
 function onChange(id, fn) { const el = document.getElementById(id); if (el) el.addEventListener("change", (e) => fn(e.target.value)); }
 function parseNum(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }
-
-export function defaultBaselineDaily() {
-  const state = getState();
-  const targets = state.sprinklerZones.filter((z) => z.weeklyTargetIn > 0).map((z) => z.weeklyTargetIn);
-  const avgTarget = targets.length ? targets.reduce((a, b) => a + b, 0) / targets.length : 1.0;
-  const daysEl = document.getElementById("wateringDays");
-  const days = (daysEl ? +daysEl.value : 0) || getState().forecast.wateringDays || 3;
-  return +(avgTarget / days).toFixed(3);
-}
 
 /* ------------------------------ NWS fetching ------------------------------ */
 
@@ -87,8 +80,6 @@ async function fetchForecast() {
   if (isNaN(lat) || isNaN(lon)) { alert("Enter a valid latitude and longitude first."); return; }
 
   if (statusEl) { statusEl.style.display = "inline-flex"; statusEl.textContent = "Fetching…"; }
-  document.getElementById("forecastEmpty").style.display = "block";
-  document.getElementById("forecastResult").style.display = "none";
 
   try {
     const ptRes = await fetch(`https://api.weather.gov/points/${lat},${lon}`);
@@ -99,32 +90,35 @@ async function fetchForecast() {
 
     const gridRes = await fetch(gridUrl);
     if (!gridRes.ok) throw new Error("grid data fetch failed (" + gridRes.status + ")");
-    const gridData = await gridRes.json();
-    const props = gridData.properties;
+    const props = (await gridRes.json()).properties;
 
-    const windowHrs = +document.getElementById("rainWindow").value;
-    const now = new Date();
-    const windowEnd = new Date(now.getTime() + windowHrs * 3600 * 1000);
-
-    const rainMm = sumSeriesInWindow(props.quantitativePrecipitation, now, windowEnd);
-    const rainIn = rainMm / 25.4;
-
-    const tmaxC = maxSeriesInWindow(props.maxTemperature, now, windowEnd);
-    const tminC = minSeriesInWindow(props.minTemperature, now, windowEnd);
-
-    let et0In = null;
-    if (tmaxC !== null && tminC !== null) {
-      et0In = hargreavesET0(lat, tmaxC, tminC, now) / 25.4;
-    }
-
-    lastForecast = { lat, lon, rainIn, tmaxC, tminC, et0In, place: pt.properties.relativeLocation?.properties, windowHrs };
-    if (statusEl) statusEl.textContent = "Updated " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    renderForecastResult(lastForecast);
+    lastForecast = { lat, lon, days: buildDays(props, new Date(), lat), failed: false };
+    if (statusEl) statusEl.textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    renderForecast();
   } catch (err) {
     console.error(err);
-    if (statusEl) statusEl.textContent = "Failed";
-    alert("Couldn't fetch the NWS forecast: " + err.message + "\n\nYou can still use the ET0 override field to enter numbers manually.");
+    if (statusEl) statusEl.textContent = "Forecast unavailable";
+    // Task 22: still render the tab with rain/ET0 unknown so schedules stay visible.
+    lastForecast = { lat, lon, days: buildDays(null, new Date(), lat), failed: true };
+    renderForecast();
   }
+}
+
+// Build 7 daily buckets from `start` (today). NWS gridpoint precipitation is in mm
+// and temperatures in degrees C; both are converted here.
+function buildDays(props, start, lat) {
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const dayStart = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const dayEnd = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i + 1);
+    const rainMm = props ? sumSeriesInWindow(props.quantitativePrecipitation, dayStart, dayEnd) : null;
+    const tmaxC = props ? maxSeriesInWindow(props.maxTemperature, dayStart, dayEnd) : null;
+    const tminC = props ? minSeriesInWindow(props.minTemperature, dayStart, dayEnd) : null;
+    let et0In = null;
+    if (tmaxC != null && tminC != null) et0In = hargreavesET0(lat, tmaxC, tminC, dayStart) / 25.4;
+    days.push({ date: dayStart, rainIn: rainMm == null ? null : rainMm / 25.4, tmaxC, tminC, et0In });
+  }
+  return days;
 }
 
 /* --------------------------- NWS series helpers --------------------------- */
@@ -132,15 +126,12 @@ async function fetchForecast() {
 function parseValidTime(vt) {
   const [startStr, durStr] = vt.split("/");
   const start = new Date(startStr);
-  const dur = parseISODuration(durStr);
-  const end = new Date(start.getTime() + dur * 1000);
-  return { start, end };
+  return { start, end: new Date(start.getTime() + parseISODuration(durStr) * 1000) };
 }
 function parseISODuration(d) {
   const m = /P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?/.exec(d);
   if (!m) return 0;
-  const days = +(m[1] || 0), hrs = +(m[2] || 0), mins = +(m[3] || 0);
-  return days * 86400 + hrs * 3600 + mins * 60;
+  return (+(m[1] || 0)) * 86400 + (+(m[2] || 0)) * 3600 + (+(m[3] || 0)) * 60;
 }
 function sumSeriesInWindow(series, winStart, winEnd) {
   if (!series || !series.values) return 0;
@@ -151,29 +142,20 @@ function sumSeriesInWindow(series, winStart, winEnd) {
     const ovStart = start < winStart ? winStart : start;
     const ovEnd = end > winEnd ? winEnd : end;
     const frac = (ovEnd - ovStart) / (end - start || 1);
-    if (v.value !== null && v.value !== undefined) total += v.value * frac;
+    if (v.value != null) total += v.value * frac;
   }
   return total;
 }
-function maxSeriesInWindow(series, winStart, winEnd) {
+function maxSeriesInWindow(series, winStart, winEnd) { return extremeInWindow(series, winStart, winEnd, true); }
+function minSeriesInWindow(series, winStart, winEnd) { return extremeInWindow(series, winStart, winEnd, false); }
+function extremeInWindow(series, winStart, winEnd, wantMax) {
   if (!series || !series.values) return null;
   let best = null;
   for (const v of series.values) {
     const { start, end } = parseValidTime(v.validTime);
     if (end <= winStart || start >= winEnd) continue;
-    if (v.value === null || v.value === undefined) continue;
-    if (best === null || v.value > best) best = v.value;
-  }
-  return best;
-}
-function minSeriesInWindow(series, winStart, winEnd) {
-  if (!series || !series.values) return null;
-  let best = null;
-  for (const v of series.values) {
-    const { start, end } = parseValidTime(v.validTime);
-    if (end <= winStart || start >= winEnd) continue;
-    if (v.value === null || v.value === undefined) continue;
-    if (best === null || v.value < best) best = v.value;
+    if (v.value == null) continue;
+    if (best === null || (wantMax ? v.value > best : v.value < best)) best = v.value;
   }
   return best;
 }
@@ -196,42 +178,61 @@ export function hargreavesET0(latDeg, tmaxC, tminC, date) {
 
 /* --------------------------------- render --------------------------------- */
 
-export function renderForecastResult(f) {
+export function renderForecast() {
+  if (!lastForecast) return;
   const state = getState();
   document.getElementById("forecastEmpty").style.display = "none";
   document.getElementById("forecastResult").style.display = "block";
 
-  const et0 = state.forecast.etOverride != null ? state.forecast.etOverride : f.et0In;
-  const rain = f.rainIn;
-  const effPct = +document.getElementById("runoffEff").value || 80;
-  const effectiveRain = rain * (effPct / 100);
-  const netNeed = (et0 || 0) - effectiveRain;
-  const baseline = +document.getElementById("baselineDaily").value || defaultBaselineDaily();
-  const adjPct = baseline > 0 ? clamp(netNeed / baseline, 0, 1.5) : 0;
+  const zoneSel = document.getElementById("forecastZone");
+  const zone = zoneById(zoneSel && zoneSel.value) || state.sprinklerZones[0];
+  const eff = (+document.getElementById("runoffEff").value || 80) / 100;
+  const cycles = zone ? effectiveCyclesPerWeek(zone.schedule) : 0;
+  const baseline = (zone && cycles > 0) ? zone.weeklyTargetIn / cycles : 0;
+  const days = lastForecast.days;
 
-  document.getElementById("forecastStats").innerHTML = `
-    <div class="stat"><div class="v">${fmt(rain, 2)}"</div><div class="l">Forecast rain (${f.windowHrs}h)</div></div>
-    <div class="stat"><div class="v">${et0 === null || et0 === undefined ? "–" : fmt(et0, 2) + '"'}</div><div class="l">ET0 ${state.forecast.etOverride != null ? "(override)" : "(estimate)"}</div></div>
-    <div class="stat"><div class="v">${fmt(effectiveRain, 2)}"</div><div class="l">Effective rain</div></div>
-    <div class="stat"><div class="v">${fmt(netNeed, 2)}"</div><div class="l">Net water need</div></div>
-    <div class="stat"><div class="v">${fmt(adjPct * 100, 0)}%</div><div class="l">Suggested adjustment</div></div>
-  `;
+  const dim = (i) => (i >= 4 ? " class=\"dim\"" : ""); // days 5-7 lower confidence
 
-  const tbody = document.querySelector("#adjustedTable tbody");
-  tbody.innerHTML = "";
-  state.sprinklerZones.forEach((z) => {
-    const adjMin = Math.round(z.runTimeMin * adjPct);
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><span class="zone-swatch" style="background:${zoneColorFor(z.id)}"></span>${escapeHtml(z.name)}</td>
-      <td>${z.runTimeMin} min</td>
-      <td>${fmt(adjPct * 100, 0)}%</td>
-      <td><b>${adjMin} min</b></td>
-    `;
-    tbody.appendChild(tr);
+  const headCells = days.map((d, i) =>
+    `<th${dim(i)}>${i === 0 ? "Today" : d.date.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" })}</th>`).join("");
+
+  const rowCells = (fn) => days.map((d, i) => `<td${dim(i)}>${fn(d, i)}</td>`).join("");
+
+  const effPct = Math.round(eff * 100);
+  const rainRow = rowCells((d) => d.rainIn == null ? "-" : fmt(d.rainIn, 2) + '"');
+  const et0Row = rowCells((d) => d.et0In == null ? "-" : fmt(d.et0In, 2) + '"');
+  const effRow = rowCells(() => effPct + "%");
+  const netRow = rowCells((d) => {
+    if (d.et0In == null || d.rainIn == null) return "-";
+    return fmt(d.et0In - d.rainIn * eff, 2) + '"';
+  });
+  const adjRow = rowCells((d) => {
+    if (!zone || !isScheduledDay(zone.schedule, d.date)) return `<span class="cell-muted">no watering</span>`;
+    if (d.et0In == null || d.rainIn == null || baseline <= 0) return "-";
+    const adj = clamp((d.et0In - d.rainIn * eff) / baseline, 0, 1.5);
+    return fmt(adj * 100, 0) + "%";
+  });
+  const runRow = rowCells((d) => {
+    if (!zone || !isScheduledDay(zone.schedule, d.date)) return `<span class="cell-muted">-</span>`;
+    if (d.et0In == null || d.rainIn == null || baseline <= 0) return "-";
+    const adj = clamp((d.et0In - d.rainIn * eff) / baseline, 0, 1.5);
+    return `<b>${Math.round(zone.runTimeMin * adj)} min</b>`;
   });
 
-  document.getElementById("forecastNote").textContent = netNeed <= 0
-    ? "Forecasted rain covers (or exceeds) estimated water need; consider skipping irrigation."
-    : "Suggested run time = base run time × adjustment %. Adjust the baseline daily need above if this feels off for your area/season.";
+  document.getElementById("forecastTable").innerHTML = `
+    <thead><tr><th>Metric</th>${headCells}</tr></thead>
+    <tbody>
+      <tr><td>Forecast rain</td>${rainRow}</tr>
+      <tr><td>ET0</td>${et0Row}</tr>
+      <tr><td>Efficiency</td>${effRow}</tr>
+      <tr><td>Net need (ET0 - rain x eff)</td>${netRow}</tr>
+      <tr><td>Adjustment</td>${adjRow}</tr>
+      <tr><td>Suggested run time</td>${runRow}</tr>
+    </tbody>`;
+
+  const cyclesTxt = zone ? cycles.toFixed(1) : "0.0";
+  const failNote = lastForecast.failed ? "The NWS forecast couldn't be fetched, so rain and ET0 show as unknown; the schedule still displays. " : "";
+  document.getElementById("forecastNote").textContent =
+    `${failNote}Baseline daily need for ${zone ? zone.name : "this zone"} = weekly target ${zone ? fmt(zone.weeklyTargetIn, 2) : "-"}" / ${cyclesTxt} cycles = ${fmt(baseline, 3)}"/day. ` +
+    "Efficiency is applied to rain (runoff/uptake). Adjustments appear only on this zone's scheduled watering days; days 5-7 are lower-confidence.";
 }

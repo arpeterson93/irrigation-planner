@@ -1,20 +1,58 @@
 /* =============================================================================
- * sync.js - optional Google Apps Script cloud-sync client.
+ * sync.js - optional Google Apps Script cloud-sync client (PLAN.md Phase 5).
  *
- * PLACEHOLDER for Phase 5 (tasks 24-26), which is gated behind an explicit
- * STOP/CONFIRM with Alex (PLAN.md section 4, Phase 5 header). Nothing here does
- * anything yet; the app is fully functional with sync disabled. The module exists
- * now only so the import graph and repo structure match PLAN.md section 2.
+ * Network + payload logic only; app.js owns the settings modal, the conflict
+ * prompt, and applying a pulled config (it can re-render). The app is fully
+ * functional with sync disabled/unconfigured - this is a bolt-on layer.
  *
- * When built, this will: read state.sync {enabled, endpointUrl, userKey}, POST
- * with Content-Type text/plain (no CORS preflight), GET ?key=..., and handle the
- * updatedAt conflict prompt. The satellite background image is never included in
- * the sync payload (PLAN.md section 1.2 carve-out).
+ * Requests are shaped to avoid CORS preflight (PLAN.md 1.2): GET with a query
+ * param, and POST with Content-Type text/plain (body is still a JSON string) and
+ * no custom headers. fetch() follows the Apps Script 302 automatically.
+ *
+ * The satellite background image is NEVER sent (a Sheet cell caps at 50k chars);
+ * calibration numbers travel so re-attaching the image on another device aligns.
  * ========================================================================== */
 
+import { getState } from "./state.js";
+
 export function isSyncConfigured(state) {
-  return !!(state && state.sync && state.sync.enabled && state.sync.endpointUrl && state.sync.userKey);
+  const s = state || getState();
+  return !!(s && s.sync && s.sync.endpointUrl && s.sync.userKey);
 }
 
-// No-op until Phase 5. Present so callers can be wired defensively.
-export function initSync() { /* intentionally empty (Phase 5) */ }
+// The config object to send: strip the in-memory v1 backup and the local-only
+// background image, keeping the calibration numbers.
+export function buildPayloadConfig(state) {
+  const s = state || getState();
+  const { _v1Backup, ...rest } = s;
+  const background = Object.assign({}, rest.background, { imageDataUrl: null });
+  return Object.assign({}, rest, { background });
+}
+
+export async function pullFromCloud() {
+  const sync = getState().sync;
+  const sep = sync.endpointUrl.indexOf("?") >= 0 ? "&" : "?";
+  const url = sync.endpointUrl + sep + "key=" + encodeURIComponent(sync.userKey);
+  const res = await fetch(url, { redirect: "follow" });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json(); // { config, updatedAt } | { error }
+}
+
+export async function pushToCloud(baseUpdatedAt, note) {
+  const state = getState();
+  const sync = state.sync;
+  const body = JSON.stringify({
+    key: sync.userKey,
+    config: buildPayloadConfig(state),
+    baseUpdatedAt: baseUpdatedAt || null,
+    note: note || "",
+  });
+  const res = await fetch(sync.endpointUrl, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body,
+    redirect: "follow",
+  });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json(); // { updatedAt } | { conflict, updatedAt, config } | { error }
+}

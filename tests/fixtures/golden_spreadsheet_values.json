@@ -67,5 +67,22 @@
       "expectedEt0InDay": 0.24,
       "sanityRangeInDay": [0.15, 0.32]
     }
+  ],
+
+  "_effective_gpm_comment": "Phase 3 supply-limited scaling (PLAN.md section 3). effectiveGpm = ratedGpm * (supplyGpm / zoneRatedTotalGpm) when supplyGpm is set AND below the zone's summed rated GPM; otherwise effectiveGpm = ratedGpm. Precip rate then uses effectiveGpm in the same 96.3*gpm/area formula.",
+  "effective_gpm_cases": [
+    { "label": "supply-limited, two equal 3.0 GPM heads on a 4.5 GPM supply",
+      "ratedGpm": 3.0, "supplyGpm": 4.5, "zoneRatedTotalGpm": 6.0,
+      "expectedFactor": 0.75, "expectedEffectiveGpm": 2.25,
+      "radiusFt": 30, "arcStartDeg": 0, "arcEndDeg": 90, "expectedPrecipRateInHr": 0.3065 },
+    { "label": "unknown supply falls back to rated",
+      "ratedGpm": 3.0, "supplyGpm": null, "zoneRatedTotalGpm": 6.0,
+      "expectedFactor": 1.0, "expectedEffectiveGpm": 3.0 },
+    { "label": "ample supply is not scaled up",
+      "ratedGpm": 3.0, "supplyGpm": 10.0, "zoneRatedTotalGpm": 6.0,
+      "expectedFactor": 1.0, "expectedEffectiveGpm": 3.0 },
+    { "label": "supply exactly at half the rated total",
+      "ratedGpm": 4.0, "supplyGpm": 2.0, "zoneRatedTotalGpm": 4.0,
+      "expectedFactor": 0.5, "expectedEffectiveGpm": 2.0 }
   ]
 }
