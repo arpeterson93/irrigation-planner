@@ -12,6 +12,10 @@
 body{
   margin:0; background:var(--paper); color:var(--ink-900);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Task 53 (Phase 9): defensive backstop so no future wide element anywhere can
+     force page-level horizontal scroll again. Not a fix on its own; the real fix
+     is min-width:0 on .card below, which lets .table-wrap contain wide tables. */
+  overflow-x:hidden;
 }
 header{
   background: linear-gradient(135deg, var(--green-900), var(--green-700));
@@ -61,6 +65,15 @@ main{max-width:1280px; margin:0 auto; padding:22px 20px 60px;}
 .card{
   background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
   box-shadow:var(--shadow); padding:18px 20px;
+  /* Task 53 (Phase 9): cards are grid/flex items (.grid.cols-2 / .cols-3). Grid
+     items default to min-width:auto, which won't shrink below a child's intrinsic
+     min-content width; a wide nowrap table (e.g. #zoneSummaryTable) then forces
+     its track wider than the viewport, dragging every sibling in that track
+     (including the heatmap card, whose canvas is width:100%) past screen width
+     and scrolling the whole page sideways. min-width:0 lets the card shrink so
+     .table-wrap's overflow-x:auto contains the table WITHIN the card instead.
+     Inert for cards not inside a constraining container. */
+  min-width:0;
 }
 .card h2{font-size:15px; margin:0 0 4px; color:var(--ink-900);}
 .card h3{font-size:13px; margin:0 0 10px; color:var(--ink-700); text-transform:uppercase; letter-spacing:.4px;}
