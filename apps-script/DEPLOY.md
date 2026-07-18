@@ -34,7 +34,18 @@ payment method, and does not pause when idle.
    - **Who has access**: **Anyone**  (required so the browser can call it; the
      per-user key is what protects each row)
 4. Click **Deploy**, approve any prompt, and **copy the Web app URL**. It ends in
-   `/exec`. That is the endpoint you paste into the app's Sync settings.
+   `/exec`.
+5. Paste that URL into the app so everyone shares it: open `docs/js/sync.js`, set
+
+   ```js
+   const SYNC_ENDPOINT_URL = "https://script.google.com/.../exec";
+   ```
+
+   then **commit and push**. That is the whole deploy: the app is served straight
+   from `/docs` on `main` (PLAN.md section 2), so there is no separate build step.
+   You only ever set this once (see the note in section 4). The URL is not a
+   secret; users never enter it, they only enter their own key (see "Hand out
+   keys" below).
 
 ## 4. Redeploying after a code change (the gotcha)
 
@@ -45,15 +56,19 @@ changing the code:
   Version: New version -> Deploy.**
 
 Using "New version" keeps the **same** `/exec` URL, so you don't have to hand out
-a new endpoint. If you instead create a brand-new deployment you'll get a new
-URL and have to update everyone.
+a new endpoint. Because that URL never changes on a redeploy, `SYNC_ENDPOINT_URL`
+in `docs/js/sync.js` only needs to be set once (the paste step at the end of
+section 3) and does **not** need touching on every `Code.gs` redeploy. If you
+instead create a brand-new deployment you'll get a new URL and would then have to
+update `SYNC_ENDPOINT_URL` once and push.
 
 ## 5. Hand out keys
 
 Give each person a short random passphrase as their key, e.g. `blue-otter-4821`.
-They enter it once in the app's Sync settings along with the `/exec` URL; it's
-stored in their browser. Each key maps to one row in the Sheet, which doubles as
-a human-readable admin view of everyone's saved config.
+They enter it once in the app's Sync settings; it's stored in their browser. The
+endpoint URL is already baked into the app (step 5 above), so it is **not**
+something they enter. Each key maps to one row in the Sheet, which doubles as a
+human-readable admin view of everyone's saved config.
 
 ## Notes / limits
 

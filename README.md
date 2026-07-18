@@ -89,7 +89,9 @@ Apps Script web app backed by one Google Sheet. It is free, needs no payment
 method, and does not pause when idle.
 
 - Backend + step-by-step deploy: `apps-script/Code.gs` and `apps-script/DEPLOY.md`.
-- In the app: header **Sync** button -> paste the `/exec` URL and your key ->
+  The endpoint URL is baked into `docs/js/sync.js` once at deploy time, so each
+  user only enters their own key.
+- In the app: header **Sync** button -> enter your key ->
   **Save to cloud** / **Load from cloud**, with an optional auto-load on open.
 - The satellite **background image is never synced** (Sheet cells cap at 50k
   characters). Calibration numbers do sync, so re-attaching the same screenshot on

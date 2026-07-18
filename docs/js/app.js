@@ -792,8 +792,7 @@ function openSyncModal() {
   const s = getState().sync;
   openModal(`
     <h3>Cloud sync</h3>
-    <p class="hint">Optional. Save your yard config to a shared Google Sheet and reload it on another device. The satellite image stays on this device; everything else syncs. Setup instructions: apps-script/DEPLOY.md.</p>
-    <div class="field"><label>Apps Script /exec URL</label><input type="text" id="syncUrl" placeholder="https://script.google.com/.../exec" value="${escapeHtml(s.endpointUrl || "")}"></div>
+    <p class="hint">Optional. Save your yard config to a shared Google Sheet and reload it on another device. The satellite image stays on this device; everything else syncs. Sync is preconfigured; just enter your own key below. Setup instructions: apps-script/DEPLOY.md.</p>
     <div class="field"><label>Your key</label><input type="text" id="syncKey" placeholder="e.g. blue-otter-4821" value="${escapeHtml(s.userKey || "")}"></div>
     <label style="display:flex; align-items:center; gap:8px; font-weight:600;"><input type="checkbox" id="syncEnabled" ${s.enabled ? "checked" : ""} style="width:auto;"> Auto-load from cloud when the app opens</label>
     <div class="hint" id="syncStatus" style="margin-top:8px;">${s.lastSyncedAt ? ("Last synced " + escapeHtml(s.lastSyncedAt)) : "Not synced yet."}</div>
@@ -805,12 +804,10 @@ function openSyncModal() {
   `);
   const persist = () => {
     const sy = getState().sync;
-    sy.endpointUrl = document.getElementById("syncUrl").value.trim() || null;
     sy.userKey = document.getElementById("syncKey").value.trim() || null;
     sy.enabled = document.getElementById("syncEnabled").checked;
     saveState();
   };
-  document.getElementById("syncUrl").addEventListener("change", persist);
   document.getElementById("syncKey").addEventListener("change", persist);
   document.getElementById("syncEnabled").addEventListener("change", persist);
   document.getElementById("syncClose").addEventListener("click", closeModal);
@@ -821,7 +818,7 @@ function openSyncModal() {
 function setSyncStatus(msg) { const el = document.getElementById("syncStatus"); if (el) el.textContent = msg; }
 
 async function doSaveToCloud() {
-  if (!isSyncConfigured(getState())) { alert("Enter the endpoint URL and your key first."); return; }
+  if (!isSyncConfigured(getState())) { alert("Enter your key first."); return; }
   setSyncStatus("Saving to cloud...");
   try {
     let res = await pushToCloud(getState().sync.lastSyncedAt);
@@ -840,7 +837,7 @@ async function doSaveToCloud() {
 }
 
 async function doLoadFromCloud() {
-  if (!isSyncConfigured(getState())) { alert("Enter the endpoint URL and your key first."); return; }
+  if (!isSyncConfigured(getState())) { alert("Enter your key first."); return; }
   setSyncStatus("Loading from cloud...");
   try {
     const res = await pullFromCloud();

@@ -267,7 +267,7 @@
       <h3>Seasonal adjustment</h3>
       <p class="hint">Net water need = ET₀ minus (forecasted rain × runoff efficiency). Adjustment % = net need ÷ baseline daily need. Each zone's suggested run time = its configured run time × adjustment %, rounded to the nearest 10% and clamped between 0% and 150%. A ▲ marks days whose unclamped need ran past 150% (watering was capped).</p>
       <h3>Your data</h3>
-      <p class="hint">Everything you enter is saved automatically in this browser (localStorage); nothing is sent anywhere except the two anonymous, keyless calls to the public NWS API when you fetch a forecast. Use <b>Export JSON</b> any time to back up or move your yard to another device, and <b>Import JSON</b> to restore it.</p>
+      <p class="hint">Everything you type is saved automatically in this browser (localStorage). That happens whether or not Sync is on. Sync (top right, off by default) is optional: turn it on and your yard config also gets saved to your own Google Sheet when you save or load, so it can follow you to another device. The satellite background image is never part of that, it always stays on the device you're using. The only other place this app talks to the internet is two anonymous, keyless calls to the public weather service when you fetch a forecast. Use <b>Export JSON</b> any time to back up your yard or move it by hand, and <b>Import JSON</b> to bring it back.</p>
       <div class="header-actions" style="margin-top:4px;">
         <button class="btn-light btn-sm" id="btnExportAbout">Export JSON</button>
         <button class="btn-light btn-sm" id="btnImportTriggerAbout">Import JSON</button>
