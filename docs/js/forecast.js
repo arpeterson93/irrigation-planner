@@ -198,7 +198,7 @@ export function renderForecast() {
   const zoneRows = state.sprinklerZones.map((z, zi) => {
     const cycles = effectiveCyclesPerWeek(z.schedule);
     const baseline = cycles > 0 ? z.weeklyTargetIn / cycles : 0;
-    const baseTip = `Baseline for Zone ${zi + 1}: weekly target ${fmt(z.weeklyTargetIn, 2)}" / ${cycles.toFixed(1)} cycles = ${fmt(baseline, 3)}"/day`;
+    const baseTip = `Baseline for Zone ${zi + 1}: weekly target ${fmt(z.weeklyTargetIn, 2)}" / ${cycles.toFixed(1)} cycles = ${fmt(baseline, 3)}"/day · base run time ${z.runTimeMin} min`;
     const cells = days.map((d, i) => {
       const dimCls = i >= 4 ? " dim" : "";
       if (!isScheduledDay(z.schedule, d.date)) return `<td class="cell-muted${dimCls}">no watering</td>`;
@@ -211,7 +211,7 @@ export function renderForecast() {
       const title = over ? ` title="unclamped need was ${Math.round(raw * 100)}%"` : "";
       return `<td class="${cls}"${title}><b>${mins} min</b> (${Math.round(adj * 100)}%)${over ? " ▲" : ""}</td>`;
     }).join("");
-    return `<tr><td title="${escapeHtml(baseTip)}">Zone ${zi + 1} <span class="muted">(base ${z.runTimeMin} min)</span></td>${cells}</tr>`;
+    return `<tr><td title="${escapeHtml(baseTip)}">Zone ${zi + 1}</td>${cells}</tr>`;
   }).join("");
 
   document.getElementById("forecastTable").innerHTML = `
@@ -220,12 +220,12 @@ export function renderForecast() {
       <tr><td>Forecast rain</td>${rainRow}</tr>
       <tr><td>ET0</td>${et0Row}</tr>
       <tr><td>Efficiency</td>${effRow}</tr>
-      <tr><td>Net need (ET0 - rain x eff)</td>${netRow}</tr>
+      <tr><td title="ET0 - rain x eff">Net need</td>${netRow}</tr>
       ${zoneRows}
     </tbody>`;
 
   const failNote = lastForecast.failed ? "The NWS forecast couldn't be fetched, so rain and ET0 show as unknown; the per-zone schedules still display. " : "";
   document.getElementById("forecastNote").textContent =
-    `${failNote}Each zone row shows its suggested run time and seasonal adjustment on that zone's scheduled watering days (hover the zone label for its baseline daily need). ` +
+    `${failNote}Each zone row shows its suggested run time and seasonal adjustment on that zone's scheduled watering days (hover the zone label for its baseline daily need and base run time). ` +
     "Efficiency is applied to rain (runoff/uptake). Adjustments are rounded to 10% and clamped between 0% and 150%; a ▲ marks days whose unclamped need exceeded 150%. Days 5-7 are lower-confidence.";
 }

@@ -51,12 +51,18 @@ const AREA_PALETTE = ["#4caf50", "#2980b9", "#e67e22", "#8e44ad", "#16a085", "#c
 // Aspect-fit canvas height for narrow viewports (PLAN.md task 45): match the
 // yard's aspect ratio inside the available width, bounded so it neither
 // collapses nor eats the whole screen. Mirrors computeTransform's 20px margin.
-function responsiveCanvasHeight(canvas, staticH) {
+// maxFrac caps the height at a fraction of the viewport (PLAN.md task 52): the
+// yard canvas wants the room (0.65) while the heat canvas shares its card with a
+// legend + caption, so it gets a lower ceiling (0.45) to fit one screenful. The
+// 240 floor stays, but on short landscape viewports the cap wins so the canvas
+// shrinks rather than overflowing.
+function responsiveCanvasHeight(canvas, staticH, maxFrac = 0.65) {
   if (!isNarrow()) return staticH;
   const yard = getState().yard;
   const inner = (canvas.clientWidth || canvas.width) - 20;
   const fit = Math.round(inner * yard.heightFt / yard.widthFt) + 20;
-  return clamp(fit, 240, Math.round(window.innerHeight * 0.65));
+  const cap = Math.round(window.innerHeight * maxFrac);
+  return Math.min(cap, clamp(fit, 240, cap));
 }
 
 export function initCanvas(d) {
@@ -620,7 +626,9 @@ export function drawHeatmap(data) {
   if (!canvas || !canvas.offsetParent) return;
   lastHeatData = data;
   canvas.width = canvas.clientWidth;
-  canvas.height = responsiveCanvasHeight(canvas, HEAT_CANVAS_H);
+  // Lower ceiling than the yard canvas (task 52): the heat card also holds a
+  // legend + caption, so 0.45 keeps the whole map on one screenful on phones.
+  canvas.height = responsiveCanvasHeight(canvas, HEAT_CANVAS_H, 0.45);
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 

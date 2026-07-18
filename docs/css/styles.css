@@ -187,6 +187,12 @@ input[type=color]{height:28px; border:1px solid var(--border); border-radius:6px
 .head-card details.hc-more{margin-top:10px; border-top:1px dashed var(--border); padding-top:8px;}
 .head-card details.hc-more summary{cursor:pointer; font-size:12.5px; font-weight:600; color:var(--green-700); padding:4px 0;}
 
+/* Task 51 (Phase 9): collapsible head list, narrow-only. The summary toggle is
+   hidden by default so desktop (>700px) is pixel-identical (list always shown,
+   list.open forced true by JS on every non-narrow viewport change). The 700px
+   query below reveals + styles the summary. */
+#headsListSummary{display:none;}
+
 @media (max-width: 700px){
   #headsTableWrap{display:none;}
   #headsCards{display:block;}
@@ -200,6 +206,22 @@ input[type=color]{height:28px; border:1px solid var(--border); border-radius:6px
   /* 16px is the standard fix for iOS Safari auto-zooming the page when a
      sub-16px input is focused. */
   input[type=text], input[type=number], select, td input, td select{font-size:16px;}
+
+  /* --- Phase 9 additions (further phone-use follow-ups) --- */
+  /* Task 51: Export/Import move off the crowded header bar into the About tab's
+     "Your data" section (buttons #btnExportAbout / #btnImportTriggerAbout, shown
+     at all widths). New / Sync / save-status stay in the header. */
+  #btnExport, #btnImportTrigger{display:none;}
+  /* Task 52: let the two coverage selects share a row so the controls card
+     shortens, giving the shorter-capped heat canvas below more of the screen. */
+  #tab-coverage .toolbar .field{min-width:0;}
+  /* Task 51: reveal the head-list collapse toggle on narrow, reusing the
+     .hc-more summary look. Sits above the list container inside #headsListSection. */
+  #headsListSummary{
+    display:block; cursor:pointer; font-size:13px; font-weight:600;
+    color:var(--green-700); padding:8px 2px; margin-top:2px;
+  }
+  #headsListSection[open] > #headsListSummary{margin-bottom:6px;}
 }
 
 @media (pointer: coarse){

@@ -214,17 +214,32 @@ function renderHeadsTable() {
   if (isNarrow()) renderHeadsCards();
   else renderHeadsRows();
   updateHeadTypeNudge();
+  updateHeadsListSummary();
+}
+
+// Keep the narrow-only collapse toggle's label showing the current head count so
+// it stays useful at a glance while collapsed (PLAN.md Phase 9, task 51). The
+// summary is CSS-hidden above 700px, so this text is only ever seen on narrow.
+function updateHeadsListSummary() {
+  const summary = document.getElementById("headsListSummary");
+  if (!summary) return;
+  const n = getState().heads.length;
+  summary.textContent = `${n} head${n === 1 ? "" : "s"} - tap to show/hide`;
 }
 
 // Shared field wiring for a single head control, used identically by the table
 // rows, the mobile cards, and the tap-to-edit modal (PLAN.md tasks 46, 48) so
 // updateHeadField / saveState / selection / structural re-render never drift.
-function attachHeadFieldHandlers(inp, h) {
+// syncList=true re-renders the head list on EVERY change: used only by the modal,
+// whose inputs live in separate DOM from the list, so re-rendering the cards
+// behind it keeps them fresh without clobbering the field being edited. Inline
+// list edits pass false so a keystroke in a cell isn't torn out mid-edit.
+function attachHeadFieldHandlers(inp, h, syncList) {
   inp.addEventListener("change", () => {
     updateHeadField(h, inp.dataset.f, inp);
     saveState();
     const structural = ["sprinklerZoneId", "type", "needsReplacement"].indexOf(inp.dataset.f) !== -1;
-    if (structural) renderHeadsTable();
+    if (structural || syncList) renderHeadsTable();
     drawYardCanvas();
     updateHeadTypeNudge();
     renderUsage();
@@ -728,7 +743,7 @@ function openEditHeadModal(headId) {
       <button class="btn-primary btn-sm" id="editHeadClose">Close</button>
     </div>
   `);
-  box.querySelectorAll("#editHeadFields input, #editHeadFields select").forEach((inp) => attachHeadFieldHandlers(inp, h));
+  box.querySelectorAll("#editHeadFields input, #editHeadFields select").forEach((inp) => attachHeadFieldHandlers(inp, h, true));
   document.getElementById("editHeadClose").addEventListener("click", closeModal);
 }
 
@@ -921,7 +936,7 @@ function renderZoneSummary(data) {
         <td>${heads.length}</td>
         <td>${fmt(rated, 2)}${scaleBadge}</td>
         <td>${fmt(st.min, 2)}</td><td>${fmt(st.med, 2)}</td><td>${fmt(st.max, 2)}</td>
-        <td>${fmt(weeklyAvg, 2)} <span class="muted">/ target ${fmt(z.weeklyTargetIn, 2)} · ${cycles.toFixed(1)}/wk</span></td>
+        <td title="${escapeHtml(`target ${fmt(z.weeklyTargetIn, 2)}"/wk at ${cycles.toFixed(1)} cycles/wk`)}">${fmt(weeklyAvg, 2)}</td>
         <td>${st.avg > 0 ? `<span class="badge ${Math.abs(weeklyAvg - z.weeklyTargetIn) <= z.weeklyTargetIn * 0.25 ? "ok" : "bad"}">${weeklyAvg >= z.weeklyTargetIn ? "on/over" : "under"}</span>` : "–"}</td>
       </tr>`;
     });
@@ -973,6 +988,10 @@ function renderUsage() {
 function wireHeaderActions() {
   document.getElementById("btnExport").addEventListener("click", exportJSON);
   document.getElementById("btnImportTrigger").addEventListener("click", () => document.getElementById("btnImport").click());
+  // Task 51: About-tab twins of Export/Import so the actions stay reachable when
+  // the narrow header hides them; same handlers, same hidden file input.
+  document.getElementById("btnExportAbout").addEventListener("click", exportJSON);
+  document.getElementById("btnImportTriggerAbout").addEventListener("click", () => document.getElementById("btnImport").click());
   document.getElementById("btnImport").addEventListener("change", (e) => {
     if (e.target.files && e.target.files[0]) importJSONFile(e.target.files[0], () => { selectedHeadId = null; renderAll(); });
     e.target.value = "";
@@ -1038,8 +1057,8 @@ function init() {
   const state = getState();
   if (state.heads.length === 0 && !localStorage.getItem(SEEDED_KEY)) {
     const zid = state.sprinklerZones[0] ? state.sprinklerZones[0].id : "sz1";
-    addHead({ id: "H1", sprinklerZoneId: zid, x: 15, y: 50, radiusFt: 20, arcStartDeg: 0, arcEndDeg: 360, ratedGpm: 2.5, notes: "example; edit or delete me" });
-    addHead({ id: "H2", sprinklerZoneId: zid, x: 45, y: 50, radiusFt: 22, arcStartDeg: 0, arcEndDeg: 360, ratedGpm: 2.5, notes: "example; edit or delete me" });
+    addHead({ id: "H1", sprinklerZoneId: zid, x: 15, y: 50, radiusFt: 20, arcStartDeg: 0, arcEndDeg: 360, ratedGpm: 2.5 });
+    addHead({ id: "H2", sprinklerZoneId: zid, x: 45, y: 50, radiusFt: 22, arcStartDeg: 0, arcEndDeg: 360, ratedGpm: 2.5 });
     localStorage.setItem(SEEDED_KEY, "1");
   }
 
@@ -1057,6 +1076,13 @@ function init() {
     drawYardCanvas();
     redrawHeatmap();
     updateEditHeadButton();
+    // Task 51: above 700px the collapse toggle is hidden and can't be reopened,
+    // so force the head list open when leaving narrow (covers a tablet resized
+    // or rotated across the breakpoint while collapsed). Desktop stays fully shown.
+    if (!isNarrow()) {
+      const sec = document.getElementById("headsListSection");
+      if (sec) sec.open = true;
+    }
   });
 
   autoPullOnLoad(); // no-op unless sync is enabled + configured

@@ -119,19 +119,28 @@
         Some heads don't have a type set yet. Set each head to rotary or fixed; it drives the coverage warnings.
       </div>
       <div class="warn-banner" id="headWarnings" style="display:none;"></div>
-      <div class="table-wrap" id="headsTableWrap">
-        <table id="headsTable">
-          <thead><tr>
-            <th></th><th>ID</th><th>Zone</th><th>Type</th><th>X (ft)</th><th>Y (ft)</th><th>Radius (ft)</th>
-            <th>Arc start°</th><th>Arc end°</th><th>GPM</th>
-            <th>Brand</th><th>Model</th><th>Nozzle</th><th>Riser (in)</th><th>Replace?</th><th>Notes</th><th></th>
-          </tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <!-- Card-per-head list, shown below the 700px breakpoint in place of the
-           17-column table (PLAN.md task 46). Rendered by renderHeadsCards(). -->
-      <div id="headsCards"></div>
+      <!-- Task 51 (Phase 9): the list content collapses on narrow viewports so a
+           long head list doesn't push the rest of the page down. Only the two
+           list containers below are inside the <details>; the heading, Add head
+           button, hint, type nudge, and warnings stay always visible. The
+           summary toggle is CSS-hidden above 700px and JS-forced open there, so
+           desktop is pixel-identical (list always shown, no toggle). -->
+      <details id="headsListSection" open>
+        <summary id="headsListSummary">Head list (tap to show/hide)</summary>
+        <div class="table-wrap" id="headsTableWrap">
+          <table id="headsTable">
+            <thead><tr>
+              <th></th><th>ID</th><th>Zone</th><th>Type</th><th>X (ft)</th><th>Y (ft)</th><th>Radius (ft)</th>
+              <th>Arc start°</th><th>Arc end°</th><th>GPM</th>
+              <th>Brand</th><th>Model</th><th>Nozzle</th><th>Riser (in)</th><th>Replace?</th><th>Notes</th><th></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <!-- Card-per-head list, shown below the 700px breakpoint in place of the
+             17-column table (PLAN.md task 46). Rendered by renderHeadsCards(). -->
+        <div id="headsCards"></div>
+      </details>
     </div>
 
     <div class="grid cols-2" style="margin-top:18px;">
@@ -259,6 +268,10 @@
       <p class="hint">Net water need = ET₀ minus (forecasted rain × runoff efficiency). Adjustment % = net need ÷ baseline daily need. Each zone's suggested run time = its configured run time × adjustment %, rounded to the nearest 10% and clamped between 0% and 150%. A ▲ marks days whose unclamped need ran past 150% (watering was capped).</p>
       <h3>Your data</h3>
       <p class="hint">Everything you enter is saved automatically in this browser (localStorage); nothing is sent anywhere except the two anonymous, keyless calls to the public NWS API when you fetch a forecast. Use <b>Export JSON</b> any time to back up or move your yard to another device, and <b>Import JSON</b> to restore it.</p>
+      <div class="header-actions" style="margin-top:4px;">
+        <button class="btn-light btn-sm" id="btnExportAbout">Export JSON</button>
+        <button class="btn-light btn-sm" id="btnImportTriggerAbout">Import JSON</button>
+      </div>
     </div>
   </section>
 
