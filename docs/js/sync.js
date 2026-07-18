@@ -23,7 +23,7 @@ import { getState } from "./state.js";
 // default so the repo doesn't ship a placeholder that looks configured but isn't.
 // Not a secret: DEPLOY.md always handed this URL out in plaintext; the per-user
 // key is what gates access (PLAN.md 1.2 security-by-obscurity model).
-const SYNC_ENDPOINT_URL = "";
+const SYNC_ENDPOINT_URL = "https://script.google.com/macros/s/AKfycby62znI4P54hmP6SrRg0J5T17FIXj6iKto-xO2xm7H3A-P7bjT8oNuGYo-ZzsUs_4LDYw/exec";
 
 export function isSyncConfigured(state) {
   const s = state || getState();
