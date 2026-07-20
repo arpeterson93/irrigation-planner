@@ -20,6 +20,7 @@ import {
   setMode, getMode, deleteArea, compressImageFile,
 } from "./canvas.js";
 import { effectiveCyclesPerWeek, scheduleLabel } from "./schedule.js";
+import { buildGridCsv, parseGridCsv } from "./gridcsv.js";
 import { zoneFlowGpm, estimateGallons } from "./usage.js";
 import {
   bindForecastForm, bindForecastFormValuesOnly, attachForecastActions, renderForecast,
@@ -992,6 +993,42 @@ function wireHeaderActions() {
   document.getElementById("btnImport").addEventListener("change", (e) => {
     if (e.target.files && e.target.files[0]) importJSONFile(e.target.files[0], () => { selectedHeadId = null; renderAll(); });
     e.target.value = "";
+  });
+  // Task 59: CSV grid export/import for yard zones and dead spaces.
+  document.getElementById("btnGridExport").addEventListener("click", () => {
+    const csv = buildGridCsv(getState());
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url; a.download = `sprinkler-simulator-yard-grid-${stamp}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+  document.getElementById("btnGridImportTrigger").addEventListener("click", () => document.getElementById("btnGridImport").click());
+  document.getElementById("btnGridImport").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      let parsed;
+      try {
+        parsed = parseGridCsv(ev.target.result, getState());
+      } catch (err) {
+        alert(err.message);
+        return;
+      }
+      const state = getState();
+      const n = parsed.yardZones.length + parsed.deadSpaces.length;
+      if (!confirm(`Replace the current ${state.yardZones.length} yard zone(s) and ${state.deadSpaces.length} dead space(s) with the ${n} area(s) from this file?`)) return;
+      state.yardZones = parsed.yardZones;
+      state.deadSpaces = parsed.deadSpaces;
+      saveState(true);
+      renderAreaLists();
+      drawYardCanvas();
+    };
+    reader.readAsText(file);
   });
   document.getElementById("btnNew").addEventListener("click", () => {
     if (confirm("Start a new blank project? This clears the yard, zones, and heads currently loaded (your saved data stays in this browser until you overwrite it; export first if unsure).")) {

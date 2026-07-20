@@ -96,6 +96,12 @@
             <input type="checkbox" id="toggleRadius" checked style="width:auto;"> Show full radius circle
           </label>
         </div>
+        <div class="toolbar" style="margin-top:8px; align-items:center;">
+          <button class="btn-light btn-sm" id="btnGridExport">Export grid CSV</button>
+          <button class="btn-light btn-sm" id="btnGridImportTrigger">Import grid CSV</button>
+          <input type="file" id="btnGridImport" accept=".csv,text/csv">
+        </div>
+        <p class="hint">Spreadsheet alternative to the drawing tools: export a 1 ft grid, mark cells (blank = turf, <code>y1</code>/<code>y2</code> = yard zone, <code>d1</code>/<code>d2</code> = dead space), then re-import. Importing replaces all current yard zones and dead spaces.</p>
         <div class="divider"></div>
         <h3>Background reference image</h3>
         <p class="hint">Load a satellite screenshot of your lot, set its scale with the two-point calibration, then trace heads and areas on top. The image stays on this device only (never uploaded, never cloud-synced).</p>
