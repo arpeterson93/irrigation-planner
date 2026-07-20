@@ -105,6 +105,53 @@ def watering_day_groups(dates, is_system_day):
     return groups
 
 
+SIGNIFICANT_CONTRIBUTION_SHARE = 0.25  # PLAN 12 decision (b)
+
+
+def avg_effective_watering_per_cycle(zones, yard_zone_cells, zone_grids, grid, notdead_cells):
+    """Python twin of forecast.js avgEffectiveWateringPerCycle (Phase 12 rule).
+    Works on hand-built per-cell fixtures rather than real geometry.
+
+      zones          : list of {id, effectiveWateringPct}
+      yard_zone_cells: list of cell-lists [(r,c),...], one per yard zone (non-dead)
+      zone_grids     : {zone_id: {(r,c): applied depth}}
+      grid           : {(r,c): combined applied depth, all zones}
+      notdead_cells  : iterable of (r,c) - the own-avg universe for the fallback
+
+    Each sprinkler zone's per-cycle figure = mean of the Avg in/cycle of the yard
+    zones it contributes >= 25% of the applied water to; else its own avg in/cycle
+    over all non-dead cells (pre-Phase-12 fallback). Scaled by Effective Watering %,
+    then averaged across zones.
+    """
+    if not zones:
+        return 0
+    yz_avg = []
+    for cells in yard_zone_cells:
+        yz_avg.append(sum(grid[c] for c in cells) / len(cells) if cells else 0)
+
+    per_zone = []
+    for z in zones:
+        zg = zone_grids.get(z["id"])
+        relevant = []
+        for yi, cells in enumerate(yard_zone_cells):
+            if zg is None or not cells:
+                continue
+            z_sum = sum(zg.get(c, 0) for c in cells)
+            total_sum = sum(grid[c] for c in cells)
+            if total_sum > 0 and z_sum / total_sum >= SIGNIFICANT_CONTRIBUTION_SHARE:
+                relevant.append(yz_avg[yi])
+        if relevant:
+            avg_per_cycle = sum(relevant) / len(relevant)
+        elif zg:
+            own = [zg.get(c, 0) for c in notdead_cells]
+            avg_per_cycle = sum(own) / len(own) if own else 0
+        else:
+            avg_per_cycle = 0
+        eff = z.get("effectiveWateringPct", 80)
+        per_zone.append(avg_per_cycle * (eff / 100))
+    return sum(per_zone) / len(per_zone)
+
+
 class TestHargreavesET0:
     @pytest.mark.parametrize("case", GOLDEN["hargreaves_et0_cases"], ids=lambda c: c["label"])
     def test_et0_matches_golden(self, case):
@@ -243,3 +290,43 @@ class TestWateringDayGroups:
         dates = list(range(4))
         is_system = lambda d: d in (0, 2)
         assert watering_day_groups(dates, is_system) == [(0, 1, False), (2, 3, False)]
+
+
+class TestYardZoneContribution:
+    def test_25_percent_share_is_inclusive_boundary(self):
+        # One yard zone Y of 4 equal cells (combined depth 1.0 each -> Avg 1.0).
+        cells = [(0, 0), (0, 1), (0, 2), (0, 3)]
+        grid = {c: 1.0 for c in cells}
+        zones = [{"id": "z1", "effectiveWateringPct": 80}]
+
+        # Exactly 25% share: z1 supplies 1.0 of the 4.0 total over Y -> counts,
+        # so its figure is Y's own Avg in/cycle (1.0), not z1's own diffuse avg.
+        zg_at = {(0, 0): 1.0, (0, 1): 0.0, (0, 2): 0.0, (0, 3): 0.0}
+        at = avg_effective_watering_per_cycle(zones, [cells], {"z1": zg_at}, grid, cells)
+        assert at == pytest.approx(1.0 * 0.80)  # 0.8, from Y's Avg (not 0.25*0.8)
+
+        # Just below 25% (0.9/4 = 0.225): does NOT count -> falls back to z1's own
+        # avg over all non-dead cells (0.9/4 = 0.225).
+        zg_below = {(0, 0): 0.9, (0, 1): 0.0, (0, 2): 0.0, (0, 3): 0.0}
+        below = avg_effective_watering_per_cycle(zones, [cells], {"z1": zg_below}, grid, cells)
+        assert below == pytest.approx(0.225 * 0.80)  # 0.18, fallback path
+
+    def test_averages_only_the_yard_zones_it_significantly_touches(self):
+        # Three disjoint single-cell yard zones with Avg in/cycle 2, 4, 10.
+        y1, y2, y3 = [(0, 0)], [(0, 1)], [(0, 2)]
+        grid = {(0, 0): 2.0, (0, 1): 4.0, (0, 2): 10.0}
+        # z1 fully supplies Y1 and Y2 (share 1.0) but only 10% of Y3.
+        zg = {(0, 0): 2.0, (0, 1): 4.0, (0, 2): 1.0}
+        zones = [{"id": "z1", "effectiveWateringPct": 100}]
+        result = avg_effective_watering_per_cycle(
+            zones, [y1, y2, y3], {"z1": zg}, grid, [(0, 0), (0, 1), (0, 2)])
+        # Mean of Y1 and Y2's Avg (2 and 4) = 3.0; Y3's 10 is excluded.
+        assert result == pytest.approx(3.0)
+
+    def test_no_yard_zones_falls_back_to_own_avg(self):
+        # Phase 11 behavior: no yard zones -> zone's own avg in/cycle over non-dead.
+        notdead = [(0, 0), (0, 1)]
+        zg = {(0, 0): 3.0, (0, 1): 1.0}  # own avg = 2.0
+        zones = [{"id": "z1", "effectiveWateringPct": 50}]
+        result = avg_effective_watering_per_cycle(zones, [], {"z1": zg}, {}, notdead)
+        assert result == pytest.approx(2.0 * 0.50)  # 1.0

@@ -25,7 +25,7 @@
 
 import { getState, saveState, clamp, fmt, escapeHtml } from "./state.js";
 import { effectiveCyclesPerWeek, isScheduledDay } from "./schedule.js";
-import { computeCoverage, statsOverCells } from "./coverage.js";
+import { computeCoverage, statsOverCells, pointInArea } from "./coverage.js";
 
 let lastForecast = null;
 
@@ -211,17 +211,62 @@ export function seasonalAdjustmentRaw(combined, avgEffPerCycle) {
   return combined / avgEffPerCycle;
 }
 
-// Mean over zones of (avg applied depth per cycle from the coverage model) scaled
-// by each zone's Effective Watering %. This is the denominator that converts a
-// group's combined net need into one system-wide adjustment (PLAN 11.3).
+// Cell-center point-in-area test (twin of app.js's cellInArea; small geometry
+// helpers are duplicated per-module in this codebase rather than shared).
+function cellInArea(data, r, c, obj) {
+  return pointInArea([(c + 0.5) * data.cell, (r + 0.5) * data.cell], obj);
+}
+
+const SIGNIFICANT_CONTRIBUTION_SHARE = 0.25; // PLAN 12 decision (b)
+
+// Weather Adj. denominator: mean over sprinkler zones of each zone's avg applied
+// depth per cycle, scaled by its Effective Watering %. Phase 12 change (12.1):
+// a sprinkler zone's per-cycle figure is now the average of the Avg in/cycle of
+// the yard zones it *significantly* waters (>= 25% share of that yard zone's
+// applied water, decision a/b), reusing the yard zone's own overall Avg in/cycle
+// (all contributing zones combined, decision c) - the same number the Coverage
+// tab's Yard-zone grouping shows. Falls back to the zone's own head coverage
+// (pre-Phase-12 behavior) when no yard zone reaches the threshold.
 export function avgEffectiveWateringPerCycle(state) {
   const data = computeCoverage(); // reads getState() itself
   const notDead = (r, c) => !data.deadMask[r][c];
   const zones = state.sprinklerZones;
   if (!zones.length) return 0;
+
+  // Each yard zone's own non-dead cell list and overall Avg in/cycle (data.grid
+  // = all zones combined), computed once and shared across sprinkler zones.
+  const yzCells = state.yardZones.map((yz) => {
+    const cells = [];
+    for (let r = 0; r < data.rows; r++) {
+      for (let c = 0; c < data.cols; c++) {
+        if (notDead(r, c) && cellInArea(data, r, c, yz)) cells.push([r, c]);
+      }
+    }
+    return cells;
+  });
+  const yzAvgPerCycle = yzCells.map((cells) => {
+    if (!cells.length) return 0;
+    let sum = 0;
+    for (const [r, c] of cells) sum += data.grid[r][c];
+    return sum / cells.length;
+  });
+
   const perZone = zones.map((z) => {
     const zg = data.zoneGrids[z.id];
-    const avgPerCycle = zg ? statsOverCells(zg, data.cell, notDead).avg : 0;
+    // Yard zones this sprinkler zone significantly contributes to (decision a/b).
+    const relevant = [];
+    state.yardZones.forEach((yz, yi) => {
+      const cells = yzCells[yi];
+      if (!zg || !cells.length) return;
+      let zSum = 0, totalSum = 0;
+      for (const [r, c] of cells) { zSum += zg[r][c]; totalSum += data.grid[r][c]; }
+      if (totalSum > 0 && zSum / totalSum >= SIGNIFICANT_CONTRIBUTION_SHARE) relevant.push(yzAvgPerCycle[yi]);
+    });
+    // Fallback: no yard zone reaches the threshold (none drawn, or this zone's
+    // water is too diffuse to be significant anywhere) -> its own avg in/cycle.
+    const avgPerCycle = relevant.length
+      ? relevant.reduce((s, v) => s + v, 0) / relevant.length
+      : (zg ? statsOverCells(zg, data.cell, notDead).avg : 0);
     return avgPerCycle * ((z.effectiveWateringPct != null ? z.effectiveWateringPct : 80) / 100);
   });
   return perZone.reduce((s, v) => s + v, 0) / perZone.length;

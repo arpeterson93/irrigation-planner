@@ -828,3 +828,85 @@ export function wateringDayGroups(days, isSystemDay) {
 No `open` attribute, so it starts collapsed regardless of viewport width (unlike `headsListSection`'s narrow-only collapse, index.html:128, which is forced open above 700px by JS — this one has no such wiring and should not gain any). `.table-wrap` (the same class `#zoneTable`/`#headsTable`/`#forecastTable` already use) gives horizontal-scroll-on-overflow, which is what actually delivers "all the months on one line" instead of wrapping across several. No `forecast.js` change needed — `kc1`..`kc12` ids and their binding (forecast.js:38-40, 49) are unchanged, only the surrounding markup moves.
 
 **Ordered task:** 68. **Implement all four 11.8 fixes** in `forecast.js`, `index.html`, and `tests/test_forecast_math.py` per the above. Run `pytest` (full suite) and manually verify: today (non-watering, odd/even test) shows "no watering" in Combined Net Need and Weather Adj., a high-need day shows an uncapped percentage and correspondingly larger zone minutes, the Kc block is collapsed on page load and expands to one horizontally-scrollable row, and the About tab's forecast description matches the current model.
+
+## 12. Phase 12 Addendum — Weather Adj. denominator via yard-zone contribution; Coverage Map defaults to Yard zone
+
+**Prepared:** July 20, 2026, from Alex asking why his Weather Adj. denominator didn't match the per-yard-zone Avg in/cycle numbers he was reading off the Coverage tab. Root cause, explained and confirmed with him: `avgEffectiveWateringPerCycle` (forecast.js:217-228, unchanged since Phase 11) averages each **sprinkler zone's own** avg-in/cycle (`statsOverCells(data.zoneGrids[z.id], data.cell, notDead).avg`, i.e. that valve's own heads over whatever they physically cover) — a completely different figure from the **yard zone**-grouped Avg in/cycle column he was comparing against (`renderZoneSummary`'s "yard" branch, app.js:904-918, which uses the combined `data.grid` — water from every zone that touches that named area — averaged over that area's own cells). That was a correct explanation of the *existing* behavior, not a bug. Alex then asked for the behavior to actually change: a sprinkler zone's figure should be derived from the yard zones it meaningfully waters, not from its own raw head coverage.
+
+**Three decisions Alex made, going in** (all via direct questions before this was written):
+(a) **"Significantly contributes" is measured by share of the yard zone's applied water**, not by cell-area reached: for sprinkler zone Z and yard zone Y, `share(Z,Y) = (sum of Z's applied depth over Y's non-dead cells) / (sum of ALL zones' combined applied depth over those same cells)`.
+(b) **Threshold: 25%.** Z counts toward Y when `share(Z,Y) >= 0.25`.
+(c) **The averaged-in number is the yard zone's own overall Avg in/cycle** — literally the same figure the Yard-zone-grouped Coverage table already shows (`data.grid` based, all contributing zones combined), not a Z-specific slice of it. Two sprinkler zones that both significantly touch the same yard zone both pull in that identical shared number as one of their inputs.
+
+Threshold and metric are hardcoded constants in this pass (not a new setting) — Alex didn't ask for them to be tunable, and this is already the fourth new percentage-style constant added to this tab in two phases; add a UI for it later only if it turns out to need adjusting.
+
+### 12.1 New `avgEffectiveWateringPerCycle` (forecast.js:217-228)
+
+Rewrite entirely. Needs `pointInArea` from `coverage.js` (already imported by `app.js`/`canvas.js`/`gridcsv.js`; forecast.js does not import it yet — add it to forecast.js:28's import list) and a local `cellInArea(data, r, c, obj)` helper identical to `app.js`'s (app.js:893-895) — mirrors this codebase's existing convention of small geometry helpers being duplicated per-module rather than shared (canvas.js already keeps its own private `pointInPolygon`/`pointInArea` for the same reason).
+
+```js
+const SIGNIFICANT_CONTRIBUTION_SHARE = 0.25; // decision (b)
+
+export function avgEffectiveWateringPerCycle(state) {
+  const data = computeCoverage();
+  const notDead = (r, c) => !data.deadMask[r][c];
+  const zones = state.sprinklerZones;
+  if (!zones.length) return 0;
+
+  // Each yard zone's own cell list and overall Avg in/cycle - identical to what
+  // renderZoneSummary's "yard" branch shows (app.js:904-918), computed once and
+  // reused for every sprinkler zone that significantly touches it (decision c).
+  const yzCells = state.yardZones.map((yz) => {
+    const cells = [];
+    for (let r = 0; r < data.rows; r++) {
+      for (let c = 0; c < data.cols; c++) {
+        if (notDead(r, c) && cellInArea(data, r, c, yz)) cells.push([r, c]);
+      }
+    }
+    return cells;
+  });
+  const yzAvgPerCycle = yzCells.map((cells) => {
+    if (!cells.length) return 0;
+    let sum = 0;
+    for (const [r, c] of cells) sum += data.grid[r][c];
+    return sum / cells.length;
+  });
+
+  const perZone = zones.map((z) => {
+    const zg = data.zoneGrids[z.id];
+    // Yard zones this sprinkler zone significantly contributes to (decision a/b).
+    const relevant = [];
+    state.yardZones.forEach((yz, yi) => {
+      const cells = yzCells[yi];
+      if (!zg || !cells.length) return;
+      let zSum = 0, totalSum = 0;
+      for (const [r, c] of cells) { zSum += zg[r][c]; totalSum += data.grid[r][c]; }
+      if (totalSum > 0 && zSum / totalSum >= SIGNIFICANT_CONTRIBUTION_SHARE) relevant.push(yzAvgPerCycle[yi]);
+    });
+    // Fallback when no yard zone reaches the threshold (no yard zones drawn, or
+    // this zone's water is too diffuse to be "significant" anywhere): the
+    // pre-Phase-12 behavior, this zone's own avg in/cycle from its own heads.
+    const avgPerCycle = relevant.length
+      ? relevant.reduce((s, v) => s + v, 0) / relevant.length
+      : (zg ? statsOverCells(zg, data.cell, notDead).avg : 0);
+    return avgPerCycle * ((z.effectiveWateringPct != null ? z.effectiveWateringPct : 80) / 100);
+  });
+  return perZone.reduce((s, v) => s + v, 0) / perZone.length;
+}
+```
+
+The final aggregation step — averaging `perZone` across all sprinkler zones, then that's the Weather Adj. denominator — is unchanged from Phase 11; only how each sprinkler zone's own `avgPerCycle` is derived changes.
+
+### 12.2 Coverage Map default grouping
+
+`#summaryGroupBy` (index.html:189) has no `selected` option today, so the browser defaults to the first one, "Sprinkler zone." Add `selected` to the `value="yard"` option instead (leave the option order as-is — Sprinkler zone first in the list, Yard zone just starts selected): `<option value="yard" selected>Yard zone</option>`. `renderZoneSummary`'s own fallback (`groupEl ? groupEl.value : "sprinkler"`, app.js:900) only matters if the element is ever missing from the DOM, which doesn't happen in practice; leave it as-is, it's dead-simple and harmless.
+
+### 12.3 Tests
+
+Add a focused test for the new contribution logic — since `avgEffectiveWateringPerCycle` needs a full `computeCoverage()` grid to run for real, test the core rule in isolation with small synthetic per-cell data (a tiny hand-built `zoneGrids`/`grid`/yard-zone-cells fixture, not a full head/polygon simulation) rather than trying to drive it through real geometry: (1) a sprinkler zone at exactly 25% share of a yard zone's water counts (boundary is inclusive, `>=`); one cell below does not and falls back to its own avg; (2) a sprinkler zone significantly touching two yard zones averages exactly those two yard zones' own avg-in/cycle numbers, not a third yard zone it doesn't reach threshold on; (3) a sprinkler zone with no yard zones defined at all in the state falls back to its own avg in/cycle unchanged from Phase 11 behavior. Add the twin to `tests/test_forecast_math.py` (a pure Python re-implementation of the rule above, same pattern as `avg_effective_watering_per_cycle`'s sibling functions already there) plus the same three cases.
+
+### 12.4 Ordered tasks (numbering continues from task 68)
+
+69. **Rewrite `avgEffectiveWateringPerCycle`** (12.1) in `forecast.js`, add the `cellInArea` helper and `pointInArea` import.
+70. **Coverage Map default grouping** (12.2): `index.html:189`.
+71. **Tests** (12.3): add the Python twin and the three-case test set to `tests/test_forecast_math.py`. Run `pytest` (full suite), then manually verify in the browser with Alex's actual multi-yard-zone layout: the Coverage tab opens on "Yard zone" grouping by default, and the Weather Adj. denominator now visibly tracks the yard-zone Avg in/cycle numbers for zones that significantly overlap them (spot-check by hand for at least one sprinkler zone: list the yard zones it's >=25% of, average their Avg in/cycle column values, multiply by that zone's Effective Watering %, and confirm it matches what the new code produces before/after `Object.assign`-style debugging in devtools if needed).
