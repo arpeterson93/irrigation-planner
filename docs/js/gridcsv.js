@@ -118,61 +118,122 @@ function parseCsv(text) {
   return rows;
 }
 
-// Turn a token's cell set into 1+ axis-aligned rectangles via scanline run-merge
-// (histogram rectangle decomposition): process y from H down to 1, match each
-// row's contiguous x-runs against currently-open rectangles by (xStart,xEnd),
-// extend matches, start new rectangles for unmatched runs, and close any open
-// rectangle a row didn't touch. Handles disjoint blocks and holes automatically.
-function decompose(cellSet, H) {
-  const rects = [];
-  let open = []; // { xStart, xEnd, yTop, yBot }
-  for (let y = H; y >= 1; y--) {
-    // Maximal contiguous x-runs present at this y.
-    const present = [];
-    for (const key of cellSet) {
-      const parts = key.split(",");
-      if (Number(parts[1]) === y) present.push(Number(parts[0]));
-    }
-    present.sort((a, b) => a - b);
-    const runs = [];
-    for (let k = 0; k < present.length; k++) {
-      const start = present[k];
-      let end = start;
-      while (k + 1 < present.length && present[k + 1] === end + 1) { end = present[++k]; }
-      runs.push([start, end]);
-    }
-
-    const newOpen = [];
-    const matched = new Set();
-    for (const [rs, re] of runs) {
-      let found = -1;
-      for (let i = 0; i < open.length; i++) {
-        if (!matched.has(i) && open[i].xStart === rs && open[i].xEnd === re) { found = i; break; }
-      }
-      if (found >= 0) {
-        matched.add(found);
-        open[found].yBot = y; // extend downward
-        newOpen.push(open[found]);
-      } else {
-        newOpen.push({ xStart: rs, xEnd: re, yTop: y, yBot: y });
+// Split a token's cell set into 4-connected regions (flood fill). Genuinely
+// disjoint blocks of the same token become separate objects; a single connected
+// region always stays one object regardless of its shape (task 61). Returns an
+// array of cell-sets, one per contiguous component.
+function connectedComponents(cellSet) {
+  const unvisited = new Set(cellSet);
+  const comps = [];
+  while (unvisited.size) {
+    const start = unvisited.values().next().value;
+    unvisited.delete(start);
+    const comp = new Set([start]);
+    const stack = [start];
+    while (stack.length) {
+      const [x, y] = stack.pop().split(",").map(Number);
+      for (const nk of [(x + 1) + "," + y, (x - 1) + "," + y, x + "," + (y + 1), x + "," + (y - 1)]) {
+        if (unvisited.has(nk)) { unvisited.delete(nk); comp.add(nk); stack.push(nk); }
       }
     }
-    // Close any open rectangle this row didn't continue.
-    for (let i = 0; i < open.length; i++) {
-      if (!matched.has(i)) rects.push(open[i]);
-    }
-    open = newOpen;
+    comps.push(comp);
   }
-  for (const o of open) rects.push(o);
-  return rects;
+  return comps;
 }
 
-// Cell column c spans feet [c-1, c]; likewise rows. A rectangle covering columns
-// xStart..xEnd and rows yBot..yTop spans feet [xStart-1, xEnd] x [yBot-1, yTop].
-function rectPolygon(rc) {
-  const x0 = rc.xStart - 1, x1 = rc.xEnd;
-  const y0 = rc.yBot - 1, y1 = rc.yTop;
-  return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+// Shoelace SIGNED area (CCW positive). coverage.js's polygonAreaSqFt takes the
+// absolute value, so it can't distinguish outer boundary (CCW) from hole (CW);
+// this local helper keeps the sign for that test.
+function signedArea(pts) {
+  let a = 0;
+  for (let i = 0, n = pts.length; i < n; i++) {
+    const p = pts[i], q = pts[(i + 1) % n];
+    a += p[0] * q[1] - q[0] * p[1];
+  }
+  return a / 2;
+}
+
+// Drop vertices where the path continues straight, so a run of grid cells along
+// one edge collapses to a single segment (one corner) instead of one vertex per
+// foot. Axis-aligned input, so "straight" is a zero cross product.
+function collapseCollinear(pts) {
+  const n = pts.length;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i - 1 + n) % n], cur = pts[i], next = pts[(i + 1) % n];
+    const cross = (cur[0] - prev[0]) * (next[1] - cur[1]) - (cur[1] - prev[1]) * (next[0] - cur[0]);
+    if (cross !== 0) out.push(cur); // keep only true corners
+  }
+  return out;
+}
+
+// Turn one 4-connected component's cell set into a single polygon ring via
+// edge-cancellation boundary tracing (a standard raster-to-polygon technique).
+// Interior shared edges cancel; the surviving directed edges form the outer
+// boundary. Any hole (a dead space carved out, or blank/other-token cells inside
+// the shape) is filled into the outer silhouette - the same "ignore holes"
+// simplification task 58 already accepted, still safe because dead-space masking
+// happens independently of yard-zone polygon shape everywhere it's used.
+function traceComponent(cells) {
+  const edges = new Set();
+  const addEdge = (a, b) => {
+    const key = a + ">" + b;
+    const rev = b + ">" + a;
+    if (edges.has(rev)) edges.delete(rev); // interior edge shared by two cells
+    else edges.add(key);
+  };
+  for (const c of cells) {
+    const [x, y] = c.split(",").map(Number);
+    const bl = (x - 1) + "," + (y - 1), br = x + "," + (y - 1);
+    const tr = x + "," + y, tl = (x - 1) + "," + y;
+    addEdge(bl, br); // bottom
+    addEdge(br, tr); // right
+    addEdge(tr, tl); // top
+    addEdge(tl, bl); // left
+  }
+
+  // Index surviving edges by start point, then chain them end-to-start into
+  // closed loops (more than one loop only when the component has a hole).
+  const startMap = new Map();
+  for (const key of edges) {
+    const [a] = key.split(">");
+    if (!startMap.has(a)) startMap.set(a, []);
+    startMap.get(a).push(key);
+  }
+  const remaining = new Set(edges);
+  const loops = [];
+  while (remaining.size) {
+    let cur = remaining.values().next().value;
+    const startPt = cur.split(">")[0];
+    const ring = [];
+    while (cur && remaining.has(cur)) {
+      remaining.delete(cur);
+      const end = cur.split(">")[1];
+      ring.push(end.split(",").map(Number));
+      if (end === startPt) break;
+      const outs = startMap.get(end) || [];
+      cur = outs.find((k) => remaining.has(k));
+    }
+    loops.push(ring);
+  }
+
+  // Keep the outer boundary (positive/CCW). A pinch that yields two positive
+  // loops is a documented edge case: keep the larger by area.
+  let best = null, bestArea = 0;
+  for (const ring of loops) {
+    const area = signedArea(ring);
+    if (area > bestArea) { bestArea = area; best = ring; }
+  }
+  const corners = collapseCollinear(best || loops[0]);
+  // Rotate to start at the bottom-left-most corner (min y, then min x) so the
+  // output is deterministic: a rectangle reproduces the same vertex order as the
+  // rest of the app's rect() helper, and round-trips stay stable.
+  let mi = 0;
+  for (let i = 1; i < corners.length; i++) {
+    if (corners[i][1] < corners[mi][1] ||
+        (corners[i][1] === corners[mi][1] && corners[i][0] < corners[mi][0])) mi = i;
+  }
+  return corners.slice(mi).concat(corners.slice(0, mi));
 }
 
 export function parseGridCsv(text, state) {
@@ -248,27 +309,28 @@ export function parseGridCsv(text, state) {
 
   const yardZones = [];
   for (const n of yTokens) {
-    const rects = decompose(masks.get("y" + n), H);
+    // One object per contiguous region (task 61); disjoint blocks still split.
+    const comps = connectedComponents(masks.get("y" + n));
     // Preserve the current entry's name/color for this token number when it
     // exists (stable round-trip); default for a genuinely new number.
     const existing = (state.yardZones || [])[n - 1];
     const name = existing ? existing.name : "Area " + n;
     const color = (existing && existing.color) ? existing.color : AREA_PALETTE[(n - 1) % AREA_PALETTE.length];
-    for (const rc of rects) {
-      yardZones.push({ id: uid("yz"), name, color, polygon: rectPolygon(rc) });
+    for (const comp of comps) {
+      yardZones.push({ id: uid("yz"), name, color, polygon: traceComponent(comp) });
     }
   }
 
   const deadSpaces = [];
   for (const n of dTokens) {
-    const rects = decompose(masks.get("d" + n), H);
+    const comps = connectedComponents(masks.get("d" + n));
     const existing = (state.deadSpaces || [])[n - 1];
     const label = existing ? existing.label : "Dead space " + n;
     // The grid can't express `kind`; keep the existing kind or default to
     // "other" (editable afterward in the Dead spaces table).
     const kind = existing ? (existing.kind || "other") : "other";
-    for (const rc of rects) {
-      deadSpaces.push({ id: uid("ds"), label, kind, polygon: rectPolygon(rc) });
+    for (const comp of comps) {
+      deadSpaces.push({ id: uid("ds"), label, kind, polygon: traceComponent(comp) });
     }
   }
 

@@ -66,50 +66,97 @@ def build_grid_csv(state):
 
 # --- parseGridCsv twin ----------------------------------------------------- #
 
-def _decompose(cell_set, H):
-    """Scanline run-merge rectangle decomposition; returns list of
-    (xStart, xEnd, yBot, yTop)."""
-    rects = []
-    open_rects = []  # list of dict(xStart, xEnd, yTop, yBot)
-    for y in range(H, 0, -1):
-        present = sorted(x for (x, yy) in cell_set if yy == y)
-        runs = []
-        k = 0
-        while k < len(present):
-            start = present[k]
-            end = start
-            while k + 1 < len(present) and present[k + 1] == end + 1:
-                k += 1
-                end = present[k]
-            runs.append((start, end))
-            k += 1
-        new_open = []
-        matched = set()
-        for (rs, re_) in runs:
-            found = -1
-            for i, o in enumerate(open_rects):
-                if i not in matched and o["xStart"] == rs and o["xEnd"] == re_:
-                    found = i
-                    break
-            if found >= 0:
-                matched.add(found)
-                open_rects[found]["yBot"] = y
-                new_open.append(open_rects[found])
-            else:
-                new_open.append({"xStart": rs, "xEnd": re_, "yTop": y, "yBot": y})
-        for i, o in enumerate(open_rects):
-            if i not in matched:
-                rects.append(o)
-        open_rects = new_open
-    rects.extend(open_rects)
-    return [(o["xStart"], o["xEnd"], o["yBot"], o["yTop"]) for o in rects]
+def _connected_components(cell_set):
+    """4-connected flood fill; returns list of component cell-sets (task 61)."""
+    unvisited = set(cell_set)
+    comps = []
+    while unvisited:
+        start = next(iter(unvisited))
+        unvisited.discard(start)
+        comp = {start}
+        stack = [start]
+        while stack:
+            x, y = stack.pop()
+            for nb in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if nb in unvisited:
+                    unvisited.discard(nb)
+                    comp.add(nb)
+                    stack.append(nb)
+        comps.append(comp)
+    return comps
 
 
-def _rect_polygon(rc):
-    xs, xe, yb, yt = rc
-    x0, x1 = xs - 1, xe
-    y0, y1 = yb - 1, yt
-    return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+def _signed_area(pts):
+    """Shoelace signed area (CCW positive)."""
+    a = 0
+    n = len(pts)
+    for i in range(n):
+        p, q = pts[i], pts[(i + 1) % n]
+        a += p[0] * q[1] - q[0] * p[1]
+    return a / 2
+
+
+def _collapse_collinear(pts):
+    n = len(pts)
+    out = []
+    for i in range(n):
+        prev, cur, nxt = pts[(i - 1) % n], pts[i], pts[(i + 1) % n]
+        cross = (cur[0] - prev[0]) * (nxt[1] - cur[1]) - (cur[1] - prev[1]) * (nxt[0] - cur[0])
+        if cross != 0:
+            out.append(cur)
+    return out
+
+
+def _trace_component(cells):
+    """Edge-cancellation boundary trace of one component to a single ring; holes
+    are filled into the outer silhouette (outer/positive loop kept)."""
+    edges = set()
+
+    def add_edge(a, b):
+        if (b, a) in edges:
+            edges.discard((b, a))
+        else:
+            edges.add((a, b))
+
+    for (x, y) in cells:
+        bl, br, tr, tl = (x - 1, y - 1), (x, y - 1), (x, y), (x - 1, y)
+        add_edge(bl, br)  # bottom
+        add_edge(br, tr)  # right
+        add_edge(tr, tl)  # top
+        add_edge(tl, bl)  # left
+
+    start_map = {}
+    for (a, b) in edges:
+        start_map.setdefault(a, []).append((a, b))
+
+    remaining = set(edges)
+    loops = []
+    while remaining:
+        cur = next(iter(remaining))
+        start_pt = cur[0]
+        ring = []
+        while cur is not None and cur in remaining:
+            remaining.discard(cur)
+            end = cur[1]
+            ring.append([end[0], end[1]])
+            if end == start_pt:
+                break
+            cur = next((e for e in start_map.get(end, []) if e in remaining), None)
+        loops.append(ring)
+
+    best, best_area = None, 0
+    for ring in loops:
+        area = _signed_area(ring)
+        if area > best_area:
+            best_area, best = area, ring
+    corners = _collapse_collinear(best if best is not None else loops[0])
+    # Rotate to start at the bottom-left-most corner (min y, then min x) so the
+    # output is deterministic and a rectangle reproduces rect()'s vertex order.
+    mi = 0
+    for i in range(1, len(corners)):
+        if corners[i][1] < corners[mi][1] or (corners[i][1] == corners[mi][1] and corners[i][0] < corners[mi][0]):
+            mi = i
+    return corners[mi:] + corners[:mi]
 
 
 def parse_grid_csv(text, state):
@@ -165,19 +212,19 @@ def parse_grid_csv(text, state):
 
     yard_zones = []
     for n in y_tokens:
-        for rc in _decompose(masks["y%d" % n], H):
-            existing = (state.get("yardZones") or [])[n - 1] if n - 1 < len(state.get("yardZones") or []) else None
-            name = existing["name"] if existing else "Area %d" % n
-            color = existing["color"] if (existing and existing.get("color")) else AREA_PALETTE[(n - 1) % len(AREA_PALETTE)]
-            yard_zones.append({"name": name, "color": color, "polygon": _rect_polygon(rc)})
+        existing = (state.get("yardZones") or [])[n - 1] if n - 1 < len(state.get("yardZones") or []) else None
+        name = existing["name"] if existing else "Area %d" % n
+        color = existing["color"] if (existing and existing.get("color")) else AREA_PALETTE[(n - 1) % len(AREA_PALETTE)]
+        for comp in _connected_components(masks["y%d" % n]):
+            yard_zones.append({"name": name, "color": color, "polygon": _trace_component(comp)})
 
     dead_spaces = []
     for n in d_tokens:
-        for rc in _decompose(masks["d%d" % n], H):
-            existing = (state.get("deadSpaces") or [])[n - 1] if n - 1 < len(state.get("deadSpaces") or []) else None
-            label = existing["label"] if existing else "Dead space %d" % n
-            kind = (existing.get("kind") or "other") if existing else "other"
-            dead_spaces.append({"label": label, "kind": kind, "polygon": _rect_polygon(rc)})
+        existing = (state.get("deadSpaces") or [])[n - 1] if n - 1 < len(state.get("deadSpaces") or []) else None
+        label = existing["label"] if existing else "Dead space %d" % n
+        kind = (existing.get("kind") or "other") if existing else "other"
+        for comp in _connected_components(masks["d%d" % n]):
+            dead_spaces.append({"label": label, "kind": kind, "polygon": _trace_component(comp)})
 
     return {"yardZones": yard_zones, "deadSpaces": dead_spaces}
 
@@ -225,9 +272,10 @@ class TestRoundTrip:
         }
         parsed = parse_grid_csv(build_grid_csv(state), state)
         assert category_grid(parsed, 10, 10) == category_grid(state, 10, 10)
-        # The yard zone rectangle-decomposes into a frame around the hole
-        # (more than one rectangle), while the dead space stays one rectangle.
-        assert len(parsed["yardZones"]) > 1
+        # Task 61: the yard zone is one contiguous region, so it comes back as a
+        # single object whose traced outline silently fills the hole. The dead
+        # space still masks the hole (category_grid equality above proves it).
+        assert len(parsed["yardZones"]) == 1
         assert len(parsed["deadSpaces"]) == 1
 
     def test_dead_wins_over_yard_on_overlap(self):
@@ -260,6 +308,32 @@ class TestDecomposition:
             tuple(map(tuple, rect(0, 0, 2, 3))),
             tuple(map(tuple, rect(5, 0, 7, 3))),
         }
+
+    def test_l_shape_single_component_is_one_object(self):
+        # A single connected L-shaped region must stay one object (task 61), not
+        # fragment into a per-rectangle pile. 4x4 block with a 2x2 corner bite.
+        state = {"yard": {"widthFt": 4, "heightFt": 4}, "yardZones": [], "deadSpaces": []}
+        lines = [
+            ",1,2,3,4",
+            "4,y1,y1,,",   # top-right 2x2 removed
+            "3,y1,y1,,",
+            "2,y1,y1,y1,y1",
+            "1,y1,y1,y1,y1",
+        ]
+        text = "\r\n".join(lines) + "\r\n"
+        parsed = parse_grid_csv(text, state)
+        assert len(parsed["yardZones"]) == 1
+        poly = parsed["yardZones"][0]["polygon"]
+        # Six corners for an L; deterministic order from the bottom-left corner.
+        assert [list(p) for p in poly] == [[0, 0], [4, 0], [4, 2], [2, 2], [2, 4], [0, 4]]
+        # The traced outline covers exactly the L's cells and nothing else.
+        present = set()
+        for yy in range(1, 5):
+            for xx in range(1, 5):
+                if point_in_polygon((xx - 0.5, yy - 0.5), poly):
+                    present.add((xx, yy))
+        expected = {(x, y) for x in (1, 2) for y in (1, 2, 3, 4)} | {(x, y) for x in (3, 4) for y in (1, 2)}
+        assert present == expected
 
 
 class TestRejections:
