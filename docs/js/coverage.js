@@ -124,7 +124,7 @@ export function computeCoverage() {
       const cy = (r + 0.5) * cell;
       for (let c = 0; c < cols; c++) {
         const cx = (c + 0.5) * cell;
-        deadMask[r][c] = state.deadSpaces.some((d) => pointInPolygon([cx, cy], d.polygon));
+        deadMask[r][c] = state.deadSpaces.some((d) => pointInArea([cx, cy], d));
       }
     }
   }
@@ -144,6 +144,12 @@ export function polygonAreaSqFt(polygon) {
   return Math.abs(a) / 2;
 }
 
+// Area of an object's outer polygon minus any holes it carries (grid-imported
+// dead spaces / yard zones can have holes; freehand shapes have none). PLAN 10.7.
+export function areaWithHolesSqFt(obj) {
+  return polygonAreaSqFt(obj.polygon) - (obj.holes || []).reduce((s, h) => s + polygonAreaSqFt(h), 0);
+}
+
 export function pointInPolygon(pt, poly) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -153,6 +159,13 @@ export function pointInPolygon(pt, poly) {
     if (hit) inside = !inside;
   }
   return inside;
+}
+
+// Point-in-object honoring holes: inside the outer polygon and not inside any
+// hole. A hole (e.g. the untouched turf a border dead space encloses) is NOT
+// part of the object. PLAN 10.7.
+export function pointInArea(pt, obj) {
+  return pointInPolygon(pt, obj.polygon) && !(obj.holes || []).some((h) => pointInPolygon(pt, h));
 }
 
 // Stats over the cells selected by includeFn(r,c). Returns per-cycle summary.

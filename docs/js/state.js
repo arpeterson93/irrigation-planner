@@ -47,7 +47,16 @@ export function defaultBackground() {
   return { imageDataUrl: null, scaleFtPerPx: null, offsetXFt: 0, offsetYFt: 0, rotationDeg: 0, opacity: 0.5 };
 }
 export function defaultForecast() {
-  return { latitude: null, longitude: null, windowDays: 7, efficiencyPct: 80 };
+  // Phase 11: `effectiveRainfallPct` replaces the old `efficiencyPct` (discounts
+  // rain only, default now 60); `irrigationNeedPct` scales net need; `kc` is a
+  // 12-month crop-coefficient table (ETc = ET0 x Kc), Apr-Oct from Alex, 1.0
+  // elsewhere (neutral off-season default per decision c).
+  return {
+    latitude: null, longitude: null, windowDays: 7,
+    effectiveRainfallPct: 60,
+    irrigationNeedPct: 100,
+    kc: { 1: 1.0, 2: 1.0, 3: 1.0, 4: 1.04, 5: 0.95, 6: 0.88, 7: 0.94, 8: 0.86, 9: 0.74, 10: 0.75, 11: 1.0, 12: 1.0 },
+  };
 }
 export function defaultSync() {
   return { enabled: false, endpointUrl: null, userKey: null, lastSyncedAt: null };
@@ -84,6 +93,7 @@ export function makeZone(index) {
     supplyGpm: 10,
     runTimeMin: 20,
     weeklyTargetIn: 1.0,
+    effectiveWateringPct: 80, // Phase 11 decision b: spray/rotor application efficiency
     schedule: defaultSchedule(),
   };
 }
@@ -189,7 +199,11 @@ export function migrateV1toV2(v1) {
     latitude: parseFloat(fc.lat),
     longitude: parseFloat(fc.lon),
     windowDays: 7,
-    efficiencyPct: (typeof fc.runoffEff === "number") ? Math.round(fc.runoffEff * 100) : 80,
+    // Phase 11: the old runoff-efficiency knob carries forward as Effective
+    // Rainfall %. Irrigation Need % and the Kc table are new (take defaults).
+    effectiveRainfallPct: (typeof fc.runoffEff === "number") ? Math.round(fc.runoffEff * 100) : 60,
+    irrigationNeedPct: 100,
+    kc: defaultForecast().kc,
   };
   if (isNaN(forecast.latitude)) forecast.latitude = null;
   if (isNaN(forecast.longitude)) forecast.longitude = null;
@@ -218,7 +232,7 @@ export function normalizeV2(raw) {
   out.schemaVersion = SCHEMA_VERSION;
   out.yard = Object.assign({ cellSizeFt: 1 }, d.yard, raw.yard || {});
   out.sprinklerZones = Array.isArray(raw.sprinklerZones) && raw.sprinklerZones.length
-    ? raw.sprinklerZones.map((z) => Object.assign({}, z, { schedule: normalizeSchedule(z.schedule) }))
+    ? raw.sprinklerZones.map((z) => Object.assign({ effectiveWateringPct: 80 }, z, { schedule: normalizeSchedule(z.schedule) }))
     : d.sprinklerZones;
   out.yardZones = Array.isArray(raw.yardZones) ? raw.yardZones : [];
   out.deadSpaces = Array.isArray(raw.deadSpaces) ? raw.deadSpaces : [];
@@ -229,6 +243,14 @@ export function normalizeV2(raw) {
     : [];
   out.background = Object.assign(defaultBackground(), raw.background || {});
   out.forecast = Object.assign(defaultForecast(), raw.forecast || {});
+  // Phase 11: carry the old efficiencyPct forward to effectiveRainfallPct if a
+  // pre-Phase-11 blob only has the old field, then drop the retired key.
+  if (raw.forecast && raw.forecast.efficiencyPct != null && raw.forecast.effectiveRainfallPct == null) {
+    out.forecast.effectiveRainfallPct = raw.forecast.efficiencyPct;
+  }
+  delete out.forecast.efficiencyPct;
+  // Merge Kc per-month so a partial/hand-edited kc object keeps the other months.
+  out.forecast.kc = Object.assign({}, defaultForecast().kc, (raw.forecast && raw.forecast.kc) || {});
   out.sync = Object.assign(defaultSync(), raw.sync || {});
   return out;
 }

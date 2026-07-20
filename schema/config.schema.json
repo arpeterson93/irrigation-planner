@@ -33,6 +33,7 @@
           "supplyGpm": { "type": ["number", "null"] },
           "runTimeMin": { "type": "number", "minimum": 0 },
           "weeklyTargetIn": { "type": "number", "minimum": 0 },
+          "effectiveWateringPct": { "type": "number", "minimum": 0, "maximum": 100 },
           "schedule": {
             "type": "object",
             "required": ["mode"],
@@ -142,7 +143,9 @@
         "latitude": { "type": ["number", "null"] },
         "longitude": { "type": ["number", "null"] },
         "windowDays": { "type": "number", "minimum": 1, "maximum": 7 },
-        "efficiencyPct": { "type": "number", "minimum": 0, "maximum": 100 }
+        "effectiveRainfallPct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "irrigationNeedPct": { "type": "number", "minimum": 0 },
+        "kc": { "type": "object" }
       }
     },
 

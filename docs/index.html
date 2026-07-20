@@ -62,7 +62,7 @@
         <div class="table-wrap">
           <table id="zoneTable">
             <thead><tr>
-              <th>Zone</th><th>Name</th><th>Run time (min)</th><th>Target (in/wk)</th><th>Supply GPM</th><th>Schedule</th><th>Flow</th><th></th>
+              <th>Zone</th><th>Name</th><th>Run time (min)</th><th>Target (in/wk)</th><th>Supply GPM</th><th>Eff. watering %</th><th>Schedule</th><th>Flow</th><th></th>
             </tr></thead>
             <tbody></tbody>
           </table>
@@ -237,11 +237,27 @@
   <section class="tabpanel" id="tab-forecast">
     <div class="card" style="margin-bottom:18px;">
       <h2>Location &amp; settings</h2>
-      <p class="hint">Pulls a live 7-day forecast from the National Weather Service (api.weather.gov, free, no key required) and estimates daily reference evapotranspiration (ET₀) with the Hargreaves-Samani method from the forecasted highs/lows at your latitude. Baseline watering need and suggested run times are derived automatically from each zone's weekly target and schedule.</p>
+      <p class="hint">Pulls a live 7-day forecast from the National Weather Service (api.weather.gov, free, no key required) and estimates daily reference evapotranspiration (ET₀) with the Hargreaves-Samani method from the forecasted highs/lows at your latitude. Crop water use (ETc), net need, and one system-wide seasonal adjustment are derived automatically from the constants below and the coverage model.</p>
       <div class="field-row">
         <div class="field"><label>Latitude</label><input type="text" id="lat" placeholder="e.g. 39.7456"></div>
         <div class="field"><label>Longitude</label><input type="text" id="lon" placeholder="e.g. -97.0892"></div>
-        <div class="field"><label>Runoff / uptake efficiency (%)</label><input type="number" id="runoffEff" min="10" max="100" step="5" value="80"></div>
+        <div class="field"><label>Effective rainfall (%)</label><input type="number" id="effRainPct" min="0" max="100" step="5" value="60"></div>
+        <div class="field"><label>Irrigation need (%)</label><input type="number" id="irrigNeedPct" min="0" max="200" step="5" value="100"></div>
+      </div>
+      <p class="hint" style="margin-bottom:6px;">Crop coefficient (Kc) by month: scales ET₀ into crop water use (ETc = ET₀ × Kc), looked up by the calendar month of each forecast day.</p>
+      <div class="field-row">
+        <div class="field"><label>Jan</label><input type="number" id="kc1" step="0.01" min="0" max="2" value="1.00"></div>
+        <div class="field"><label>Feb</label><input type="number" id="kc2" step="0.01" min="0" max="2" value="1.00"></div>
+        <div class="field"><label>Mar</label><input type="number" id="kc3" step="0.01" min="0" max="2" value="1.00"></div>
+        <div class="field"><label>Apr</label><input type="number" id="kc4" step="0.01" min="0" max="2" value="1.04"></div>
+        <div class="field"><label>May</label><input type="number" id="kc5" step="0.01" min="0" max="2" value="0.95"></div>
+        <div class="field"><label>Jun</label><input type="number" id="kc6" step="0.01" min="0" max="2" value="0.88"></div>
+        <div class="field"><label>Jul</label><input type="number" id="kc7" step="0.01" min="0" max="2" value="0.94"></div>
+        <div class="field"><label>Aug</label><input type="number" id="kc8" step="0.01" min="0" max="2" value="0.86"></div>
+        <div class="field"><label>Sep</label><input type="number" id="kc9" step="0.01" min="0" max="2" value="0.74"></div>
+        <div class="field"><label>Oct</label><input type="number" id="kc10" step="0.01" min="0" max="2" value="0.75"></div>
+        <div class="field"><label>Nov</label><input type="number" id="kc11" step="0.01" min="0" max="2" value="1.00"></div>
+        <div class="field"><label>Dec</label><input type="number" id="kc12" step="0.01" min="0" max="2" value="1.00"></div>
       </div>
       <div class="toolbar" style="margin-bottom:0; align-items:center;">
         <button class="btn-light btn-sm" id="btnGeolocate">📍 Use my location</button>

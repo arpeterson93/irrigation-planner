@@ -134,6 +134,11 @@ function pointInPolygon(pt, poly) {
   }
   return inside;
 }
+// Hole-aware twin of coverage.js's pointInArea (canvas keeps its own private
+// pointInPolygon; this mirrors that pattern). PLAN 10.7.
+function pointInArea(pt, obj) {
+  return pointInPolygon(pt, obj.polygon) && !(obj.holes || []).some((h) => pointInPolygon(pt, h));
+}
 function centroid(poly) {
   let x = 0, y = 0;
   for (const p of poly) { x += p[0]; y += p[1]; }
@@ -193,6 +198,18 @@ function pathPolygon(ctx, ptsPx) {
   ptsPx.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
   ctx.closePath();
 }
+// Path an outer ring plus any hole rings as subpaths of one path, so an evenodd
+// fill/clip renders the holes as cutouts. Zero holes => identical to
+// pathPolygon. PLAN 10.7.
+function pathArea(ctx, ptsPx, holesPx) {
+  ctx.beginPath();
+  ptsPx.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+  (holesPx || []).forEach((hole) => {
+    hole.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+  });
+}
 
 function drawBackground(ctx) {
   const bg = getState().background;
@@ -227,9 +244,10 @@ function drawAreas(ctx) {
   state.yardZones.forEach((z) => {
     const ptsPx = z.polygon.map(([x, y]) => toPx(x, y));
     if (ptsPx.length < 2) return;
+    const holesPx = (z.holes || []).map((h) => h.map(([x, y]) => toPx(x, y)));
     const sel = selectedArea && selectedArea.kind === "yardzone" && selectedArea.id === z.id;
-    pathPolygon(ctx, ptsPx);
-    ctx.fillStyle = hexA(z.color || "#4caf50", 0.16); ctx.fill();
+    pathArea(ctx, ptsPx, holesPx);
+    ctx.fillStyle = hexA(z.color || "#4caf50", 0.16); ctx.fill("evenodd");
     ctx.strokeStyle = z.color || "#4caf50"; ctx.lineWidth = sel ? 3 : 1.8; ctx.stroke();
     label(ctx, centroid(ptsPx), z.name || "Zone", z.color || "#2c3e50");
     if (sel) drawVertices(ctx, ptsPx, z.color || "#4caf50");
@@ -237,21 +255,22 @@ function drawAreas(ctx) {
   state.deadSpaces.forEach((d) => {
     const ptsPx = d.polygon.map(([x, y]) => toPx(x, y));
     if (ptsPx.length < 2) return;
+    const holesPx = (d.holes || []).map((h) => h.map(([x, y]) => toPx(x, y)));
     const sel = selectedArea && selectedArea.kind === "deadspace" && selectedArea.id === d.id;
-    pathPolygon(ctx, ptsPx);
-    ctx.fillStyle = "rgba(120,130,125,0.12)"; ctx.fill();
-    drawHatch(ctx, ptsPx);
-    ctx.strokeStyle = "#7f8c8d"; ctx.lineWidth = sel ? 3 : 1.4; pathPolygon(ctx, ptsPx); ctx.stroke();
+    pathArea(ctx, ptsPx, holesPx);
+    ctx.fillStyle = "rgba(120,130,125,0.12)"; ctx.fill("evenodd");
+    drawHatch(ctx, ptsPx, holesPx);
+    ctx.strokeStyle = "#7f8c8d"; ctx.lineWidth = sel ? 3 : 1.4; pathArea(ctx, ptsPx, holesPx); ctx.stroke();
     label(ctx, centroid(ptsPx), d.label || d.kind || "Dead space", "#3c4a44");
     if (sel) drawVertices(ctx, ptsPx, "#7f8c8d");
   });
 }
 
-function drawHatch(ctx, ptsPx) {
+function drawHatch(ctx, ptsPx, holesPx) {
   let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
   for (const [x, y] of ptsPx) { minx = Math.min(minx, x); miny = Math.min(miny, y); maxx = Math.max(maxx, x); maxy = Math.max(maxy, y); }
   ctx.save();
-  pathPolygon(ctx, ptsPx); ctx.clip();
+  pathArea(ctx, ptsPx, holesPx); ctx.clip("evenodd");
   ctx.strokeStyle = "rgba(90,100,95,0.45)"; ctx.lineWidth = 1;
   const span = maxy - miny;
   for (let x0 = minx - span; x0 < maxx; x0 += 8) {
@@ -541,8 +560,8 @@ function hitVertexPx(canvas, e) {
 function areaAt(ptFeet) {
   // dead space wins over yard zone (PLAN.md 6.6)
   const s = getState();
-  for (const d of s.deadSpaces) if (pointInPolygon(ptFeet, d.polygon)) return { kind: "deadspace", obj: d };
-  for (const z of s.yardZones) if (pointInPolygon(ptFeet, z.polygon)) return { kind: "yardzone", obj: z };
+  for (const d of s.deadSpaces) if (pointInArea(ptFeet, d)) return { kind: "deadspace", obj: d };
+  for (const z of s.yardZones) if (pointInArea(ptFeet, z)) return { kind: "yardzone", obj: z };
   return null;
 }
 function polyFor(area) {

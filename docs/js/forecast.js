@@ -1,23 +1,29 @@
 /* =============================================================================
  * forecast.js - NWS 7-day forecast, Hargreaves-Samani ET0, and the day-by-day
- * seasonal-adjustment table (PLAN.md Phase 4, tasks 20-22).
+ * outlook table (PLAN.md Phase 4, tasks 20-22; reworked in Phase 11).
  *
  * hargreavesET0 is the JS twin of tests/test_forecast_math.py; keep them in sync.
  *
- * Everything downstream is derived, not manually entered:
- *   - baseline daily need   = zone.weeklyTargetIn / effectiveCyclesPerWeek(schedule)
- *   - net need (per day)     = ET0 - rain * efficiency
- *   - raw adjustment         = netNeed / baseline                         (per zone)
- *   - shown adjustment %     = clamp(round(rawAdj * 10) / 10, 0, 1.5)     (10% steps, 0-150%)
- *   - suggested run time      = round(zone.runTimeMin * shownAdj)          [live from the zone]
- * The table shows one row PER SPRINKLER ZONE (task 38): each zone's suggested run
- * time + adjustment appear only on that zone's scheduled watering days; other days
- * read "no watering". A rawAdj above 1.5 is flagged (▲) so silent clamping never
- * hides a genuinely dry day. Days 5-7 are visually de-emphasized (note 6.5).
+ * Phase 11 math (all derived, nothing manually entered):
+ *   - Kc (per day)          = state.forecast.kc[month]          (12-month table)
+ *   - ETc (per day)          = ET0 * Kc
+ *   - Net need (per day)     = max(0, ETc - rain * effRain%) * irrigationNeed%
+ *   - watering-day groups    = maximal runs between system watering days, where a
+ *                              system watering day = ANY zone scheduled (decision a)
+ *   - Combined net need      = sum of a group's per-day net needs
+ *   - avgEffPerCycle         = mean over zones of (avg in/cycle from coverage) *
+ *                              zone.effectiveWateringPct%
+ *   - seasonal adjustment    = clamp(round((combined / avgEffPerCycle)*10)/10, 0, 1.5)
+ *                              ONE number per group for the whole system (not per zone)
+ *   - zone minutes (per day) = round(zone.runTimeMin * groupAdj) on scheduled days
+ *   - total runtime (per day)= sum of every zone's minutes that day
+ * Combined Net Need and Seasonal Adjustment render as one colspan cell per group.
+ * A raw adjustment above 1.5 is flagged (▲). Days 5-7 are de-emphasized (note 6.5).
  * ========================================================================== */
 
 import { getState, saveState, clamp, fmt, escapeHtml } from "./state.js";
 import { effectiveCyclesPerWeek, isScheduledDay } from "./schedule.js";
+import { computeCoverage, statsOverCells } from "./coverage.js";
 
 let lastForecast = null;
 
@@ -27,14 +33,20 @@ export function bindForecastForm() {
   bindForecastFormValuesOnly();
   onChange("lat", (v) => { getState().forecast.latitude = parseNum(v); saveState(); });
   onChange("lon", (v) => { getState().forecast.longitude = parseNum(v); saveState(); });
-  onChange("runoffEff", (v) => { getState().forecast.efficiencyPct = +v; saveState(); if (lastForecast) renderForecast(); });
+  onChange("effRainPct", (v) => { getState().forecast.effectiveRainfallPct = +v; saveState(); if (lastForecast) renderForecast(); });
+  onChange("irrigNeedPct", (v) => { getState().forecast.irrigationNeedPct = +v; saveState(); if (lastForecast) renderForecast(); });
+  for (let m = 1; m <= 12; m++) {
+    onChange("kc" + m, (v) => { getState().forecast.kc[m] = +v; saveState(); if (lastForecast) renderForecast(); });
+  }
 }
 
 export function bindForecastFormValuesOnly() {
   const fc = getState().forecast;
   setVal("lat", fc.latitude != null ? fc.latitude : "");
   setVal("lon", fc.longitude != null ? fc.longitude : "");
-  setVal("runoffEff", fc.efficiencyPct != null ? fc.efficiencyPct : 80);
+  setVal("effRainPct", fc.effectiveRainfallPct != null ? fc.effectiveRainfallPct : 60);
+  setVal("irrigNeedPct", fc.irrigationNeedPct != null ? fc.irrigationNeedPct : 100);
+  for (let m = 1; m <= 12; m++) setVal("kc" + m, fc.kc && fc.kc[m] != null ? fc.kc[m] : 1.0);
 }
 
 function setVal(id, v) { const el = document.getElementById(id); if (el) el.value = v; }
@@ -167,7 +179,69 @@ export function hargreavesET0(latDeg, tmaxC, tminC, date) {
   return 0.0023 * RaMm * (tmean + 17.8) * Math.sqrt(diff);
 }
 
+/* ----------------------------- Phase 11 math ------------------------------ */
+// Pure helpers, twins of tests/test_forecast_math.py. Keep both sides in sync.
+
+export function etcIn(et0In, kc) {
+  return et0In == null ? null : et0In * kc;
+}
+
+// Rain-adjusted crop need, floored at zero BEFORE the Irrigation Need % scalar.
+export function netNeedIn(et0In, rainIn, kc, effRainPct, irrNeedPct) {
+  if (et0In == null || rainIn == null) return null;
+  const etc = et0In * kc;
+  return Math.max(0, etc - rainIn * (effRainPct / 100)) * (irrNeedPct / 100);
+}
+
+// Sum a group's per-day net needs; null if any day in the group is null.
+export function combinedNetNeed(dayNeeds, start, end) {
+  let sum = 0;
+  for (let i = start; i <= end; i++) {
+    if (dayNeeds[i] == null) return null;
+    sum += dayNeeds[i];
+  }
+  return sum;
+}
+
+// Raw system seasonal adjustment for a group; null when it can't be computed.
+export function seasonalAdjustmentRaw(combined, avgEffPerCycle) {
+  if (combined == null || !(avgEffPerCycle > 0)) return null;
+  return combined / avgEffPerCycle;
+}
+
+// Mean over zones of (avg applied depth per cycle from the coverage model) scaled
+// by each zone's Effective Watering %. This is the denominator that converts a
+// group's combined net need into one system-wide adjustment (PLAN 11.3).
+export function avgEffectiveWateringPerCycle(state) {
+  const data = computeCoverage(); // reads getState() itself
+  const notDead = (r, c) => !data.deadMask[r][c];
+  const zones = state.sprinklerZones;
+  if (!zones.length) return 0;
+  const perZone = zones.map((z) => {
+    const zg = data.zoneGrids[z.id];
+    const avgPerCycle = zg ? statsOverCells(zg, data.cell, notDead).avg : 0;
+    return avgPerCycle * ((z.effectiveWateringPct != null ? z.effectiveWateringPct : 80) / 100);
+  });
+  return perZone.reduce((s, v) => s + v, 0) / perZone.length;
+}
+
+// Group the visible days by system watering day: close a group at each day (from
+// index 1 on) that is itself a system watering day, opening a new one there. Day
+// 0 always starts a group; the final group runs to the last day (PLAN 11.2).
+export function wateringDayGroups(days, isSystemDay) {
+  const groups = [];
+  let gs = 0;
+  for (let i = 1; i < days.length; i++) {
+    if (isSystemDay(days[i].date)) { groups.push({ start: gs, end: i - 1 }); gs = i; }
+  }
+  groups.push({ start: gs, end: days.length - 1 });
+  return groups;
+}
+
 /* --------------------------------- render --------------------------------- */
+
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function shortDate(d) { return `${MONTH_ABBR[d.getMonth()]} ${d.getDate()}`; }
 
 export function renderForecast() {
   if (!lastForecast) return;
@@ -175,7 +249,10 @@ export function renderForecast() {
   document.getElementById("forecastEmpty").style.display = "none";
   document.getElementById("forecastResult").style.display = "block";
 
-  const eff = (+document.getElementById("runoffEff").value || 80) / 100;
+  const fc = state.forecast;
+  const effRainPct = +document.getElementById("effRainPct").value || 0;
+  const irrNeedPct = +document.getElementById("irrigNeedPct").value || 0;
+  const kcOf = (date) => (fc.kc && fc.kc[date.getMonth() + 1] != null) ? +fc.kc[date.getMonth() + 1] : 1.0;
   const days = lastForecast.days;
 
   const dim = (i) => (i >= 4 ? " class=\"dim\"" : ""); // days 5-7 lower confidence
@@ -183,35 +260,82 @@ export function renderForecast() {
   const headCells = days.map((d, i) =>
     `<th${dim(i)}>${i === 0 ? "Today" : d.date.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" })}</th>`).join("");
 
-  // Global (zone-independent) rows: rain, ET0, efficiency, net need.
+  // Per-day derived values.
+  const kcByDay = days.map((d) => kcOf(d.date));
+  const etcByDay = days.map((d, i) => etcIn(d.et0In, kcByDay[i]));
+  const netByDay = days.map((d, i) => netNeedIn(d.et0In, d.rainIn, kcByDay[i], effRainPct, irrNeedPct));
+
+  // Zone-independent per-day rows: rain, ET0, Kc, ETc, Net need.
   const rowCells = (fn) => days.map((d, i) => `<td${dim(i)}>${fn(d, i)}</td>`).join("");
-  const effPct = Math.round(eff * 100);
   const rainRow = rowCells((d) => d.rainIn == null ? "-" : fmt(d.rainIn, 2) + '"');
   const et0Row = rowCells((d) => d.et0In == null ? "-" : fmt(d.et0In, 2) + '"');
-  const effRow = rowCells(() => effPct + "%");
-  const netRow = rowCells((d) => {
-    if (d.et0In == null || d.rainIn == null) return "-";
-    return fmt(d.et0In - d.rainIn * eff, 2) + '"';
+  const kcRow = rowCells((d, i) => fmt(kcByDay[i], 2));
+  const etcRow = rowCells((d, i) => etcByDay[i] == null ? "-" : fmt(etcByDay[i], 2) + '"');
+  const netRow = rowCells((d, i) => netByDay[i] == null ? "-" : fmt(netByDay[i], 2) + '"');
+
+  // Watering-day grouping (decision a: a day counts if ANY zone is scheduled).
+  const isSystemDay = (date) => state.sprinklerZones.some((z) => isScheduledDay(z.schedule, date));
+  const groups = wateringDayGroups(days, isSystemDay);
+  const avgEff = avgEffectiveWateringPerCycle(state);
+
+  // Per-group combined net need + one system seasonal adjustment.
+  const groupInfo = groups.map((g) => {
+    const combined = combinedNetNeed(netByDay, g.start, g.end);
+    const raw = seasonalAdjustmentRaw(combined, avgEff);
+    const adj = raw == null ? null : clamp(Math.round(raw * 10) / 10, 0, 1.5);
+    return { ...g, combined, raw, adj };
   });
 
-  // One row per sprinkler zone: adjusted run time (adjustment%) on scheduled days.
+  // One colspan cell per group, spanning the days it covers.
+  const groupRow = (fn) => groupInfo.map((g) => {
+    const span = g.end - g.start + 1;
+    const dimCls = g.start >= 4 ? " class=\"dim\"" : "";
+    const title = ` title="${shortDate(days[g.start].date)} - ${shortDate(days[g.end].date)}"`;
+    return `<td colspan="${span}"${dimCls}${title}>${fn(g)}</td>`;
+  }).join("");
+  const combinedRow = groupRow((g) => g.combined == null ? "-" : fmt(g.combined, 2) + '"');
+  const adjRow = groupRow((g) => {
+    if (g.adj == null) return "-";
+    const over = g.raw > 1.5;
+    return `${Math.round(g.adj * 100)}%${over ? ` ▲` : ""}`;
+  });
+
+  // Minutes matrix: computed once, reused by the zone rows and the total row so
+  // rounding never disagrees. null = not watering that day; number = minutes
+  // (or null if the group's adjustment couldn't be computed).
+  const groupOfDay = [];
+  groupInfo.forEach((g, gi) => { for (let i = g.start; i <= g.end; i++) groupOfDay[i] = gi; });
+  const zoneDayMinutes = state.sprinklerZones.map((z) => days.map((d, i) => {
+    if (!isScheduledDay(z.schedule, d.date)) return { watering: false };
+    const g = groupInfo[groupOfDay[i]];
+    if (g.adj == null) return { watering: true, min: null };
+    return { watering: true, min: Math.round(z.runTimeMin * g.adj) };
+  }));
+
   const zoneRows = state.sprinklerZones.map((z, zi) => {
-    const cycles = effectiveCyclesPerWeek(z.schedule);
-    const baseline = cycles > 0 ? z.weeklyTargetIn / cycles : 0;
-    const baseTip = `Baseline for Zone ${zi + 1}: weekly target ${fmt(z.weeklyTargetIn, 2)}" / ${cycles.toFixed(1)} cycles = ${fmt(baseline, 3)}"/day · base run time ${z.runTimeMin} min`;
+    const effW = z.effectiveWateringPct != null ? z.effectiveWateringPct : 80;
+    const baseTip = `Zone ${zi + 1}: base run time ${z.runTimeMin} min · effective watering ${effW}% (minutes = base x the system seasonal adjustment above)`;
     const cells = days.map((d, i) => {
       const dimCls = i >= 4 ? " dim" : "";
-      if (!isScheduledDay(z.schedule, d.date)) return `<td class="cell-muted${dimCls}">no watering</td>`;
-      if (d.et0In == null || d.rainIn == null || baseline <= 0) return `<td class="${dimCls.trim()}">-</td>`;
-      const raw = (d.et0In - d.rainIn * eff) / baseline;
-      const adj = clamp(Math.round(raw * 10) / 10, 0, 1.5);
-      const mins = Math.round(z.runTimeMin * adj);
-      const over = raw > 1.5;
-      const cls = ("cell-run" + dimCls + (over ? " warn" : "")).trim();
-      const title = over ? ` title="unclamped need was ${Math.round(raw * 100)}%"` : "";
-      return `<td class="${cls}"${title}><b>${mins} min</b> (${Math.round(adj * 100)}%)${over ? " ▲" : ""}</td>`;
+      const cell = zoneDayMinutes[zi][i];
+      if (!cell.watering) return `<td class="cell-muted${dimCls}">no watering</td>`;
+      if (cell.min == null) return `<td class="${dimCls.trim()}">-</td>`;
+      return `<td class="${("cell-run" + dimCls).trim()}"><b>${cell.min} min</b></td>`;
     }).join("");
     return `<tr><td title="${escapeHtml(baseTip)}">Zone ${zi + 1}</td>${cells}</tr>`;
+  }).join("");
+
+  // Total zones runtime per day: sum of every zone's minutes (0 when not
+  // watering); "-" if a scheduled zone that day is missing its adjustment.
+  const totalRow = days.map((d, i) => {
+    const dimCls = i >= 4 ? " dim" : "";
+    let sum = 0, unknown = false;
+    zoneDayMinutes.forEach((zrow) => {
+      const cell = zrow[i];
+      if (cell.watering) { if (cell.min == null) unknown = true; else sum += cell.min; }
+    });
+    const val = unknown ? "-" : `<b>${sum} min</b>`;
+    return `<td class="${dimCls.trim()}">${val}</td>`;
   }).join("");
 
   document.getElementById("forecastTable").innerHTML = `
@@ -219,13 +343,17 @@ export function renderForecast() {
     <tbody>
       <tr><td>Forecast rain</td>${rainRow}</tr>
       <tr><td>ET0</td>${et0Row}</tr>
-      <tr><td>Efficiency</td>${effRow}</tr>
-      <tr><td title="ET0 - rain x eff">Net need</td>${netRow}</tr>
+      <tr><td title="Crop coefficient by month; ETc = ET0 x Kc">Kc</td>${kcRow}</tr>
+      <tr><td title="Crop water use = ET0 x Kc">ETc</td>${etcRow}</tr>
+      <tr><td title="max(0, ETc - rain x effective-rainfall%) x irrigation-need%">Net need</td>${netRow}</tr>
+      <tr><td title="Sum of net need across each watering-day group">Combined net need</td>${combinedRow}</tr>
+      <tr><td title="One system-wide adjustment per group = combined net need / avg effective watering per cycle">Recommended seasonal adjustment</td>${adjRow}</tr>
       ${zoneRows}
+      <tr><td>Total zones runtime (min)</td>${totalRow}</tr>
     </tbody>`;
 
-  const failNote = lastForecast.failed ? "The NWS forecast couldn't be fetched, so rain and ET0 show as unknown; the per-zone schedules still display. " : "";
+  const failNote = lastForecast.failed ? "The NWS forecast couldn't be fetched, so rain and ET0 show as unknown; the schedules and groupings still display. " : "";
   document.getElementById("forecastNote").textContent =
-    `${failNote}Each zone row shows its suggested run time and seasonal adjustment on that zone's scheduled watering days (hover the zone label for its baseline daily need and base run time). ` +
-    "Efficiency is applied to rain (runoff/uptake). Adjustments are rounded to 10% and clamped between 0% and 150%; a ▲ marks days whose unclamped need exceeded 150%. Days 5-7 are lower-confidence.";
+    `${failNote}Kc scales ET0 into crop water use (ETc = ET0 x Kc), looked up by each day's calendar month. Net need floors the rain-adjusted crop need at zero, then scales by the Irrigation Need %. ` +
+    "Combined net need sums each watering-day group (a group runs between days on which any zone waters); the merged cell spans those days. The Recommended seasonal adjustment is one number for the whole system, not per zone: it is rounded to 10% and clamped 0-150%, with a ▲ when the unclamped value exceeded 150%. Each zone row shows only its minutes (base run time x that adjustment) on its own watering days; the bottom row totals all zones' minutes per day. Days 5-7 are lower-confidence.";
 }

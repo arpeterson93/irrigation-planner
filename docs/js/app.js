@@ -12,8 +12,8 @@ import {
 } from "./state.js";
 import { isSyncConfigured, pullFromCloud, pushToCloud } from "./sync.js";
 import {
-  computeCoverage, statsOverCells, avgOverCells, pointInPolygon,
-  zoneRatedGpm, zoneScaleFactor, headPrecipRate, polygonAreaSqFt,
+  computeCoverage, statsOverCells, avgOverCells, pointInArea,
+  zoneRatedGpm, zoneScaleFactor, headPrecipRate, areaWithHolesSqFt,
 } from "./coverage.js";
 import {
   initCanvas, drawYardCanvas, drawHeatmap, redrawHeatmap, getLastHeatData,
@@ -114,6 +114,7 @@ function renderZoneTable() {
       <td><input type="number" data-f="runTimeMin" value="${z.runTimeMin}" min="0" max="180" step="1" style="width:70px;"></td>
       <td><input type="number" data-f="weeklyTargetIn" value="${z.weeklyTargetIn}" min="0" max="10" step="0.1" style="width:70px;"></td>
       <td><input type="number" data-f="supplyGpm" value="${z.supplyGpm == null ? "" : z.supplyGpm}" min="0" max="100" step="0.5" style="width:70px;" placeholder="auto"></td>
+      <td><input type="number" data-f="effectiveWateringPct" value="${z.effectiveWateringPct}" min="0" max="100" step="5" style="width:70px;"></td>
       <td class="schedule-cell">${escapeHtml(scheduleLabel(z.schedule))} <span class="muted">· ${effectiveCyclesPerWeek(z.schedule).toFixed(1)}/wk</span> <button class="btn-light btn-sm" data-act="editSched">Edit</button></td>
       <td><button class="btn-light btn-sm" data-act="flow">Flow…</button></td>
       <td>${removable ? `<button class="btn-danger btn-sm" data-act="delZone" title="Remove empty zone">✕</button>` : ""}</td>
@@ -403,7 +404,7 @@ function renderAreaLists() {
       <td><input type="color" data-f="color" value="${z.color || "#4caf50"}" style="width:38px; padding:2px;"></td>
       <td><input type="text" data-f="name" value="${escapeHtml(z.name || "")}" style="min-width:110px;"></td>
       <td>${z.polygon.length}</td>
-      <td>${fmt(polygonAreaSqFt(z.polygon), 0)}</td>
+      <td>${fmt(areaWithHolesSqFt(z), 0)}</td>
       <td><button class="btn-danger btn-sm" data-act="del">✕</button></td>
     `;
     tr.querySelectorAll("input").forEach((inp) => inp.addEventListener("change", () => {
@@ -423,7 +424,7 @@ function renderAreaLists() {
       <td><input type="text" data-f="label" value="${escapeHtml(d.label || "")}" style="min-width:110px;"></td>
       <td><select data-f="kind">${kindOpts}</select></td>
       <td>${d.polygon.length}</td>
-      <td>${fmt(polygonAreaSqFt(d.polygon), 0)}</td>
+      <td>${fmt(areaWithHolesSqFt(d), 0)}</td>
       <td><button class="btn-danger btn-sm" data-act="del">✕</button></td>
     `;
     tr.querySelectorAll("input,select").forEach((inp) => inp.addEventListener("change", () => {
@@ -889,8 +890,8 @@ function recomputeAndRender() {
   renderZoneSummary(data);
 }
 
-function cellInPolygon(data, r, c, poly) {
-  return pointInPolygon([(c + 0.5) * data.cell, (r + 0.5) * data.cell], poly);
+function cellInArea(data, r, c, obj) {
+  return pointInArea([(c + 0.5) * data.cell, (r + 0.5) * data.cell], obj);
 }
 
 function renderZoneSummary(data) {
@@ -903,7 +904,7 @@ function renderZoneSummary(data) {
   if (groupBy === "yard") {
     let rows = "";
     state.yardZones.forEach((yz) => {
-      const inZone = (r, c) => notDead(r, c) && cellInPolygon(data, r, c, yz.polygon);
+      const inZone = (r, c) => notDead(r, c) && cellInArea(data, r, c, yz);
       const st = statsOverCells(data.grid, data.cell, inZone);
       const weeklyAvg = avgOverCells(data.weeklyGrid, inZone);
       rows += `<tr>

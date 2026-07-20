@@ -37,13 +37,19 @@ def point_in_polygon(pt, poly):
 
 # --- buildGridCsv twin ----------------------------------------------------- #
 
+def point_in_area(pt, obj):
+    """Twin of coverage.js pointInArea: inside the outer polygon, not in a hole."""
+    return point_in_polygon(pt, obj["polygon"]) and not any(
+        point_in_polygon(pt, h) for h in obj.get("holes", []))
+
+
 def _cell_token(x, y, state):
     pt = (x - 0.5, y - 0.5)
     for i, ds in enumerate(state.get("deadSpaces", [])):
-        if point_in_polygon(pt, ds["polygon"]):
+        if point_in_area(pt, ds):
             return "d%d" % (i + 1)
     for i, yz in enumerate(state.get("yardZones", [])):
-        if point_in_polygon(pt, yz["polygon"]):
+        if point_in_area(pt, yz):
             return "y%d" % (i + 1)
     return ""
 
@@ -145,14 +151,24 @@ def _trace_component(cells):
             cur = next((e for e in start_map.get(end, []) if e in remaining), None)
         loops.append(ring)
 
-    best, best_area = None, 0
+    # Partition by winding: positive/CCW is the outer boundary, negative/CW are
+    # holes (kept, not discarded - the 10.7 fix). Returns (polygon, holes).
+    positives, holes = [], []
     for ring in loops:
         area = _signed_area(ring)
-        if area > best_area:
-            best_area, best = area, ring
-    corners = _collapse_collinear(best if best is not None else loops[0])
-    # Rotate to start at the bottom-left-most corner (min y, then min x) so the
-    # output is deterministic and a rectangle reproduces rect()'s vertex order.
+        if area > 0:
+            positives.append((area, ring))
+        elif area < 0:
+            holes.append(_finalize_loop(ring))
+    positives.sort(key=lambda t: t[0], reverse=True)
+    outer = _finalize_loop(positives[0][1] if positives else loops[0])
+    return outer, holes
+
+
+def _finalize_loop(ring):
+    """Collapse collinear vertices, then rotate to a deterministic start
+    (min y, then min x). Applied to the outer ring and every hole."""
+    corners = _collapse_collinear(ring)
     mi = 0
     for i in range(1, len(corners)):
         if corners[i][1] < corners[mi][1] or (corners[i][1] == corners[mi][1] and corners[i][0] < corners[mi][0]):
@@ -230,7 +246,8 @@ def parse_grid_csv(text, state):
         name = entry[0] if (entry and entry[0]) else "Area %d" % n
         color = entry[1] if (entry and entry[1]) else AREA_PALETTE[(n - 1) % len(AREA_PALETTE)]
         for comp in _connected_components(masks["y%d" % n]):
-            yard_zones.append({"name": name, "color": color, "polygon": _trace_component(comp)})
+            polygon, holes = _trace_component(comp)
+            yard_zones.append({"name": name, "color": color, "polygon": polygon, "holes": holes})
 
     dead_spaces = []
     for n in d_tokens:
@@ -238,7 +255,8 @@ def parse_grid_csv(text, state):
         label = entry[0] if (entry and entry[0]) else "Dead space %d" % n
         kind = entry[1] if (entry and entry[1]) else "other"
         for comp in _connected_components(masks["d%d" % n]):
-            dead_spaces.append({"label": label, "kind": kind, "polygon": _trace_component(comp)})
+            polygon, holes = _trace_component(comp)
+            dead_spaces.append({"label": label, "kind": kind, "polygon": polygon, "holes": holes})
 
     return {"yardZones": yard_zones, "deadSpaces": dead_spaces}
 
@@ -257,9 +275,9 @@ def category_grid(state, W, H):
         for x in range(1, W + 1):
             pt = (x - 0.5, y - 0.5)
             cat = ""
-            if any(point_in_polygon(pt, d["polygon"]) for d in state.get("deadSpaces", [])):
+            if any(point_in_area(pt, d) for d in state.get("deadSpaces", [])):
                 cat = "D"
-            elif any(point_in_polygon(pt, z["polygon"]) for z in state.get("yardZones", [])):
+            elif any(point_in_area(pt, z) for z in state.get("yardZones", [])):
                 cat = "Y"
             grid[(x, y)] = cat
     return grid
@@ -286,11 +304,14 @@ class TestRoundTrip:
         }
         parsed = parse_grid_csv(build_grid_csv(state), state)
         assert category_grid(parsed, 10, 10) == category_grid(state, 10, 10)
-        # Task 61: the yard zone is one contiguous region, so it comes back as a
-        # single object whose traced outline silently fills the hole. The dead
-        # space still masks the hole (category_grid equality above proves it).
+        # Task 61: the yard zone is one contiguous region -> a single object.
         assert len(parsed["yardZones"]) == 1
         assert len(parsed["deadSpaces"]) == 1
+        # Task 63: the Lawn zone now also carries a (correctly ignorable) hole for
+        # the patio it wraps around. Never the broken case - a yard-zone hole is
+        # harmless since the dead space masks it independently - but the field is
+        # populated now, and point_in_area treats the patio as not-lawn.
+        assert len(parsed["yardZones"][0]["holes"]) == 1
 
     def test_dead_wins_over_yard_on_overlap(self):
         # Overlapping yard zone and dead space: overlap cells must read as dead.
@@ -388,6 +409,31 @@ class TestLegendIdentity:
         assert [(z["name"], z["color"]) for z in parsed["yardZones"]] == [
             ("Front lawn", "#4caf50"), ("Side strip", "#8e44ad")]
         assert [(d["label"], d["kind"]) for d in parsed["deadSpaces"]] == [("Driveway", "driveway")]
+
+
+class TestHoles:
+    def test_border_dead_space_encloses_untouched_interior(self):
+        # Task 63 / 10.7: Alex's exact bug. A dead space forms a ring around the
+        # whole yard, fully enclosing an untouched interior region. Before the
+        # fix, traceComponent dropped the hole and the WHOLE yard came back dead.
+        W = H = 12
+        state = {"yard": {"widthFt": W, "heightFt": H}, "yardZones": [], "deadSpaces": []}
+        # d1 = everything except a clean 6x6 interior square (cells x,y in 4..9).
+        header = "," + ",".join(str(x) for x in range(1, W + 1))
+        lines = [header]
+        for y in range(H, 0, -1):
+            cells = ["" if (4 <= x <= 9 and 4 <= y <= 9) else "d1" for x in range(1, W + 1)]
+            lines.append(str(y) + "," + ",".join(cells))
+        text = "\r\n".join(lines) + "\r\n"
+
+        parsed = parse_grid_csv(text, state)
+        assert len(parsed["deadSpaces"]) == 1
+        ds = parsed["deadSpaces"][0]
+        assert len(ds["holes"]) == 1  # exactly one enclosed interior region
+        # Interior center reads as NOT dead (this is the line that failed before).
+        assert not point_in_area((6.5, 6.5), ds)
+        # A point in the border still reads dead.
+        assert point_in_area((0.5, 0.5), ds)
 
 
 class TestRejections:

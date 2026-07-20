@@ -18,7 +18,7 @@
  * same way the canvas draws.
  * ========================================================================== */
 
-import { pointInPolygon } from "./coverage.js";
+import { pointInArea } from "./coverage.js";
 import { uid } from "./state.js";
 
 // Mirrors canvas.js:49 AREA_PALETTE; kept as a local copy so this module stays
@@ -43,11 +43,11 @@ function cellToken(x, y, state) {
   const pt = [x - 0.5, y - 0.5];
   const ds = state.deadSpaces || [];
   for (let i = 0; i < ds.length; i++) {
-    if (pointInPolygon(pt, ds[i].polygon)) return "d" + (i + 1);
+    if (pointInArea(pt, ds[i])) return "d" + (i + 1);
   }
   const yz = state.yardZones || [];
   for (let i = 0; i < yz.length; i++) {
-    if (pointInPolygon(pt, yz[i].polygon)) return "y" + (i + 1);
+    if (pointInArea(pt, yz[i])) return "y" + (i + 1);
   }
   return "";
 }
@@ -169,13 +169,27 @@ function collapseCollinear(pts) {
   return out;
 }
 
-// Turn one 4-connected component's cell set into a single polygon ring via
-// edge-cancellation boundary tracing (a standard raster-to-polygon technique).
-// Interior shared edges cancel; the surviving directed edges form the outer
-// boundary. Any hole (a dead space carved out, or blank/other-token cells inside
-// the shape) is filled into the outer silhouette - the same "ignore holes"
-// simplification task 58 already accepted, still safe because dead-space masking
-// happens independently of yard-zone polygon shape everywhere it's used.
+// Collapse collinear vertices, then rotate to a deterministic start (min y, then
+// min x) so output is stable/testable - applied to the outer ring and every hole.
+function finalizeLoop(ring) {
+  const corners = collapseCollinear(ring);
+  let mi = 0;
+  for (let i = 1; i < corners.length; i++) {
+    if (corners[i][1] < corners[mi][1] ||
+        (corners[i][1] === corners[mi][1] && corners[i][0] < corners[mi][0])) mi = i;
+  }
+  return corners.slice(mi).concat(corners.slice(0, mi));
+}
+
+// Turn one 4-connected component's cell set into a polygon ring plus any holes,
+// via edge-cancellation boundary tracing (a standard raster-to-polygon
+// technique). Interior shared edges cancel; the surviving directed edges form
+// closed loops - the positive/CCW loop is the outer boundary, negative/CW loops
+// are holes. Holes are KEPT (returned in `.holes`): a dead space with a real hole
+// in itself (a border ring enclosing untouched turf) is masked only by its own
+// polygon, so discarding its hole turned the whole interior dead (the 10.7 bug).
+// Freehand-drawn zones never produce holes, so `.holes` is [] for them.
+// Returns { polygon, holes }.
 function traceComponent(cells) {
   const edges = new Set();
   const addEdge = (a, b) => {
@@ -219,23 +233,19 @@ function traceComponent(cells) {
     loops.push(ring);
   }
 
-  // Keep the outer boundary (positive/CCW). A pinch that yields two positive
-  // loops is a documented edge case: keep the larger by area.
-  let best = null, bestArea = 0;
+  // Partition loops by winding: positive/CCW are outer boundaries, negative/CW
+  // are holes. Outer boundary is the largest positive loop (rare-pinch tiebreak
+  // as before); every negative loop is kept as a hole.
+  const positives = [];
+  const holes = [];
   for (const ring of loops) {
     const area = signedArea(ring);
-    if (area > bestArea) { bestArea = area; best = ring; }
+    if (area > 0) positives.push({ ring, area });
+    else if (area < 0) holes.push(finalizeLoop(ring));
   }
-  const corners = collapseCollinear(best || loops[0]);
-  // Rotate to start at the bottom-left-most corner (min y, then min x) so the
-  // output is deterministic: a rectangle reproduces the same vertex order as the
-  // rest of the app's rect() helper, and round-trips stay stable.
-  let mi = 0;
-  for (let i = 1; i < corners.length; i++) {
-    if (corners[i][1] < corners[mi][1] ||
-        (corners[i][1] === corners[mi][1] && corners[i][0] < corners[mi][0])) mi = i;
-  }
-  return corners.slice(mi).concat(corners.slice(0, mi));
+  positives.sort((a, b) => b.area - a.area);
+  const polygon = finalizeLoop(positives.length ? positives[0].ring : loops[0]);
+  return { polygon, holes };
 }
 
 export function parseGridCsv(text, state) {
@@ -332,7 +342,8 @@ export function parseGridCsv(text, state) {
     const name = (entry && entry[0]) ? entry[0] : "Area " + n;
     const color = (entry && entry[1]) ? entry[1] : AREA_PALETTE[(n - 1) % AREA_PALETTE.length];
     for (const comp of comps) {
-      yardZones.push({ id: uid("yz"), name, color, polygon: traceComponent(comp) });
+      const { polygon, holes } = traceComponent(comp);
+      yardZones.push({ id: uid("yz"), name, color, polygon, holes });
     }
   }
 
@@ -345,7 +356,8 @@ export function parseGridCsv(text, state) {
     // "other" (editable afterward in the Dead spaces table).
     const kind = (entry && entry[1]) ? entry[1] : "other";
     for (const comp of comps) {
-      deadSpaces.push({ id: uid("ds"), label, kind, polygon: traceComponent(comp) });
+      const { polygon, holes } = traceComponent(comp);
+      deadSpaces.push({ id: uid("ds"), label, kind, polygon, holes });
     }
   }
 

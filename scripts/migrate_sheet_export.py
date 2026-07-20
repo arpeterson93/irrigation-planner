@@ -87,6 +87,7 @@ def build_v2(rows, yard_width, yard_height, origin):
                               if _get(r, "gpm_avail") not in (None, "") else None),
                 "runTimeMin": _num(_get(r, "run_min"), 20),
                 "weeklyTargetIn": _num(_get(r, "target_in"), 1.0),
+                "effectiveWateringPct": 80,  # Phase 11 decision b
                 "schedule": {"mode": "days_of_week", "daysOfWeek": evenly_spaced_weekdays(3)},
             }
 
@@ -114,7 +115,7 @@ def build_v2(rows, yard_width, yard_height, origin):
 
     sprinkler_zones = [zones[z] for z in zone_order] or [{
         "id": "sz1", "name": "Zone 1", "supplyGpm": 10, "runTimeMin": 20,
-        "weeklyTargetIn": 1.0,
+        "weeklyTargetIn": 1.0, "effectiveWateringPct": 80,
         "schedule": {"mode": "days_of_week", "daysOfWeek": evenly_spaced_weekdays(3)},
     }]
 
@@ -127,7 +128,10 @@ def build_v2(rows, yard_width, yard_height, origin):
         "heads": heads,
         "background": {"imageDataUrl": None, "scaleFtPerPx": None,
                        "offsetXFt": 0, "offsetYFt": 0, "rotationDeg": 0, "opacity": 0.5},
-        "forecast": {"latitude": None, "longitude": None, "windowDays": 7, "efficiencyPct": 80},
+        "forecast": {"latitude": None, "longitude": None, "windowDays": 7,
+                     "effectiveRainfallPct": 60, "irrigationNeedPct": 100,
+                     "kc": {"1": 1.0, "2": 1.0, "3": 1.0, "4": 1.04, "5": 0.95, "6": 0.88,
+                            "7": 0.94, "8": 0.86, "9": 0.74, "10": 0.75, "11": 1.0, "12": 1.0}},
         "sync": {"enabled": False, "endpointUrl": None, "userKey": None, "lastSyncedAt": None},
     }
 

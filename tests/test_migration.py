@@ -86,8 +86,10 @@ class TestScheduleDerivation:
 
 
 class TestForecastMigration:
-    def test_efficiency_stored_as_percent(self, v2):
-        assert v2["forecast"]["efficiencyPct"] == 80  # from runoffEff 0.8
+    def test_effective_rainfall_stored_as_percent(self, v2):
+        # Phase 11: the old runoffEff (0.8) carries forward as Effective Rainfall %.
+        assert v2["forecast"]["effectiveRainfallPct"] == 80
+        assert "efficiencyPct" not in v2["forecast"]
 
     def test_lat_lon_parsed_to_numbers(self, v2):
         assert v2["forecast"]["latitude"] == pytest.approx(39.7456)

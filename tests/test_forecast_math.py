@@ -1,10 +1,12 @@
 """
-Golden tests for the forecast/seasonal-adjustment math (Hargreaves-Samani ET0,
-baseline daily need, adjustment percentage).
+Golden tests for the forecast math: Hargreaves-Samani ET0 (unchanged),
+cycles-per-week baseline (unchanged), and the Phase 11 rework - Kc/ETc, net need
+(floored, then Irrigation Need % scaled), combined net need over watering-day
+groups, and one system-wide seasonal adjustment.
 
-Re-implements the exact logic from legacy/sprinkler-simulator.html
-(hargreavesET0, defaultBaselineDaily, renderForecastResult in the <script> block)
-in Python, asserted against a hand-checked reference case.
+The Phase 11 helpers here are Python twins of docs/js/forecast.js (etcIn,
+netNeedIn, combinedNetNeed, seasonalAdjustmentRaw, wateringDayGroups); keep both
+sides in sync. hargreavesET0 is asserted against a hand-checked reference case.
 """
 import json
 import math
@@ -46,21 +48,52 @@ def baseline_daily_need_in(weekly_target_in, cycles_per_week):
     return weekly_target_in / cycles_per_week
 
 
-def adjustment_pct(et0_in, rain_in, runoff_efficiency_pct, baseline_daily_need_in_):
-    """Phase 7 task 38: net need, then adjustment rounded to the nearest 10% and
-    clamped to 0%-150%. Returns (shown_adj_fraction, net_need_in, raw_fraction).
+# --- Phase 11 pure helpers (twins of forecast.js) -------------------------- #
 
-    JS twin: forecast.js renderForecast, adj = clamp(round(raw*10)/10, 0, 1.5).
-    raw is the unclamped ratio; raw > 1.5 means the day was capped (over-cap flag).
-    shown_adj is None when there is no baseline (no schedule / zero cycles).
-    """
-    effective_rain_in = rain_in * (runoff_efficiency_pct / 100)
-    net_need_in = (et0_in or 0) - effective_rain_in
-    if baseline_daily_need_in_ <= 0:
-        return None, net_need_in, None
-    raw = net_need_in / baseline_daily_need_in_
-    shown = clamp(round(raw * 10) / 10, 0, 1.5)
-    return shown, net_need_in, raw
+def etc_in(et0_in, kc):
+    """Crop water use: ETc = ET0 x Kc (None if ET0 is unknown)."""
+    return None if et0_in is None else et0_in * kc
+
+
+def net_need_in(et0_in, rain_in, kc, eff_rain_pct, irr_need_pct):
+    """max(0, ETc - rain x effRain%) x irrigationNeed% - floored at zero BEFORE
+    the Irrigation Need % scalar (Phase 11 11.1 row 6). None if data is missing."""
+    if et0_in is None or rain_in is None:
+        return None
+    etc = et0_in * kc
+    return max(0.0, etc - rain_in * (eff_rain_pct / 100)) * (irr_need_pct / 100)
+
+
+def combined_net_need(day_needs, start, end):
+    """Sum a group's per-day net needs; None if any day in range is None."""
+    total = 0.0
+    for i in range(start, end + 1):
+        if day_needs[i] is None:
+            return None
+        total += day_needs[i]
+    return total
+
+
+def seasonal_adjustment(combined, avg_eff_per_cycle):
+    """One system adjustment for a group. Returns (shown, raw); (None, None) when
+    it can't be computed. shown = clamp(round(raw*10)/10, 0, 1.5)."""
+    if combined is None or not (avg_eff_per_cycle > 0):
+        return None, None
+    raw = combined / avg_eff_per_cycle
+    return clamp(round(raw * 10) / 10, 0, 1.5), raw
+
+
+def watering_day_groups(dates, is_system_day):
+    """Group visible days by system watering day (decision a). Twin of
+    forecast.js wateringDayGroups. Returns list of (start, end) index pairs."""
+    groups = []
+    gs = 0
+    for i in range(1, len(dates)):
+        if is_system_day(dates[i]):
+            groups.append((gs, i - 1))
+            gs = i
+    groups.append((gs, len(dates) - 1))
+    return groups
 
 
 class TestHargreavesET0:
@@ -104,38 +137,80 @@ class TestBaselineDailyNeed:
         assert baseline_daily_need_in(weekly_target_in=1.0, cycles_per_week=0) == 0
 
 
-class TestAdjustmentPct:
-    def test_rain_fully_covers_need_suggests_skip(self):
-        # Phase 7 task 38: clamp floor is 0%, so a wet day rounds down to a skip.
-        shown, net, raw = adjustment_pct(et0_in=0.2, rain_in=1.0, runoff_efficiency_pct=80, baseline_daily_need_in_=0.3)
-        assert net <= 0
-        assert raw < 0
-        assert shown == 0
+class TestNetNeed:
+    def test_kc_scales_et0_into_etc(self):
+        # ETc = ET0 x Kc; July Kc default 0.94.
+        assert etc_in(0.30, 0.94) == pytest.approx(0.282)
+        assert etc_in(None, 0.94) is None
 
-    def test_hot_dry_day_suggests_full_or_over_watering(self):
-        shown, net, raw = adjustment_pct(et0_in=0.3, rain_in=0.0, runoff_efficiency_pct=80, baseline_daily_need_in_=0.3)
-        assert net == pytest.approx(0.3)
-        assert shown == pytest.approx(1.0)
-        assert raw == pytest.approx(1.0)
+    def test_rain_fully_covers_need_floors_at_zero(self):
+        # Phase 11: heavy rain floors net need at exactly 0 (never negative, which
+        # the old per-zone formula could reach).
+        net = net_need_in(et0_in=0.2, rain_in=1.0, kc=1.0, eff_rain_pct=60, irr_need_pct=100)
+        assert net == 0.0
 
-    def test_adjustment_rounded_to_nearest_ten_percent(self):
+    def test_floor_applies_before_scalar(self):
+        # ETc - effective rain is negative here; must read as 0, not a negative
+        # number scaled by the Irrigation Need %.
+        net = net_need_in(et0_in=0.30, rain_in=0.50, kc=0.90, eff_rain_pct=60, irr_need_pct=100)
+        assert net == 0.0
+
+    def test_hot_dry_day_is_full_etc_scaled_by_irrigation_need(self):
+        # No rain: net need = ETc x irrigationNeed%.
+        assert net_need_in(0.30, 0.0, 1.0, 60, 100) == pytest.approx(0.30)
+        assert net_need_in(0.30, 0.0, 1.0, 60, 50) == pytest.approx(0.15)
+
+    def test_more_effective_rainfall_never_increases_need(self):
+        low = net_need_in(0.30, 0.20, 1.0, 60, 100)
+        high = net_need_in(0.30, 0.20, 1.0, 100, 100)
+        assert high <= low
+
+    def test_missing_data_returns_none(self):
+        assert net_need_in(None, 0.2, 1.0, 60, 100) is None
+        assert net_need_in(0.3, None, 1.0, 60, 100) is None
+
+
+class TestSeasonalAdjustment:
+    def test_rounded_to_nearest_ten_percent(self):
         # raw = 0.339 / 0.3 = 1.13 -> rounds to 1.1 (110%), not 113%.
-        shown, _, raw = adjustment_pct(et0_in=0.339, rain_in=0.0, runoff_efficiency_pct=80, baseline_daily_need_in_=0.3)
+        shown, raw = seasonal_adjustment(0.339, 0.3)
         assert raw == pytest.approx(1.13)
         assert shown == pytest.approx(1.1)
 
-    def test_adjustment_clamped_at_150_percent_and_flags_over_cap(self):
-        shown, _, raw = adjustment_pct(et0_in=1.0, rain_in=0.0, runoff_efficiency_pct=80, baseline_daily_need_in_=0.1)
+    def test_clamped_at_150_percent_and_flags_over_cap(self):
+        shown, raw = seasonal_adjustment(1.0, 0.1)
         assert shown == pytest.approx(1.5)
-        assert raw > 1.5  # over-cap: the UI marks this day with a warning (task 38c)
+        assert raw > 1.5  # over-cap: the UI marks the group with a ▲
 
-    def test_no_baseline_returns_none(self):
-        shown, _, raw = adjustment_pct(et0_in=0.3, rain_in=0.0, runoff_efficiency_pct=80, baseline_daily_need_in_=0)
-        assert shown is None and raw is None
+    def test_none_when_no_denominator_or_no_combined(self):
+        assert seasonal_adjustment(0.3, 0) == (None, None)
+        assert seasonal_adjustment(None, 0.3) == (None, None)
 
-    def test_efficiency_expressed_as_percent_not_fraction(self):
-        """Schema v2 stores efficiencyPct (e.g. 80), not a 0-1 fraction. Guard the conversion."""
-        pct_at_80, _, _ = adjustment_pct(et0_in=0.3, rain_in=0.2, runoff_efficiency_pct=80, baseline_daily_need_in_=0.3)
-        pct_at_100, _, _ = adjustment_pct(et0_in=0.3, rain_in=0.2, runoff_efficiency_pct=100, baseline_daily_need_in_=0.3)
-        # More efficiency capture (100%) should never suggest *more* watering than 80%.
-        assert pct_at_100 <= pct_at_80
+
+class TestCombinedNetNeed:
+    def test_sums_group_and_propagates_missing(self):
+        needs = [0.1, 0.2, 0.3, None, 0.4]
+        assert combined_net_need(needs, 0, 2) == pytest.approx(0.6)
+        assert combined_net_need(needs, 2, 4) is None  # a None day poisons the group
+
+    def test_grouping_is_union_of_schedules_not_either_alone(self):
+        import datetime
+        # A week starting Monday. Zone A waters Wednesdays, Zone B waters Fridays.
+        monday = datetime.date(2026, 7, 20)  # a Monday
+        dates = [monday + datetime.timedelta(days=i) for i in range(7)]
+        zone_a = {"daysOfWeek": [2]}  # Wed (Mon=0)
+        zone_b = {"daysOfWeek": [4]}  # Fri
+
+        def sched(z):
+            return lambda d: d.weekday() in z["daysOfWeek"]
+
+        is_a, is_b = sched(zone_a), sched(zone_b)
+        is_system = lambda d: is_a(d) or is_b(d)  # decision a: any zone
+
+        union = watering_day_groups(dates, is_system)
+        assert union == [(0, 1), (2, 3), (4, 6)]
+        # The union grouping matches NEITHER zone's own schedule grouping.
+        assert watering_day_groups(dates, is_a) == [(0, 1), (2, 6)]
+        assert watering_day_groups(dates, is_b) == [(0, 3), (4, 6)]
+        assert union != watering_day_groups(dates, is_a)
+        assert union != watering_day_groups(dates, is_b)

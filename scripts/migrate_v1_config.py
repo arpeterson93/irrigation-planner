@@ -77,6 +77,7 @@ def migrate(v1):
             "supplyGpm": supply if (isinstance(supply, (int, float)) and supply > 0) else None,
             "runTimeMin": float(z.get("runMin") or 0),
             "weeklyTargetIn": float(z.get("targetIn") or 0),
+            "effectiveWateringPct": 80,  # Phase 11 decision b
             "schedule": json.loads(json.dumps(schedule)),
         })
 
@@ -112,11 +113,17 @@ def migrate(v1):
             return None
 
     runoff = forecast_v1.get("runoffEff")
+    # Phase 11: the old runoff-efficiency knob carries forward as Effective
+    # Rainfall %; Irrigation Need % and the 12-month Kc table are new defaults.
+    # Twin of state.js defaultForecast()/migrateV1toV2 - keep them in sync.
     forecast = {
         "latitude": num_or_none(forecast_v1.get("lat")),
         "longitude": num_or_none(forecast_v1.get("lon")),
         "windowDays": 7,
-        "efficiencyPct": round(runoff * 100) if isinstance(runoff, (int, float)) else 80,
+        "effectiveRainfallPct": round(runoff * 100) if isinstance(runoff, (int, float)) else 60,
+        "irrigationNeedPct": 100,
+        "kc": {"1": 1.0, "2": 1.0, "3": 1.0, "4": 1.04, "5": 0.95, "6": 0.88,
+               "7": 0.94, "8": 0.86, "9": 0.74, "10": 0.75, "11": 1.0, "12": 1.0},
     }
 
     out = {
