@@ -663,6 +663,8 @@ This "preserve the name/color across reimport" heuristic guesses that token numb
 
 63. **Implement the 10.7 fix** across `gridcsv.js`, `coverage.js`, `canvas.js`, `app.js`, and `tests/test_gridcsv.py`, per the line references above. Manually re-verify in the browser with Alex's actual layout (a border dead space fully enclosing part of the yard): confirm the interior renders as normal turf (not hatched), the Coverage Map / usage estimate treat the interior as watered turf again, the Dead spaces table's sq-ft column subtracts the hole, and clicking inside the interior no longer selects the dead space. Also re-check a plain freehand-drawn zone (no holes) still renders/selects/measures exactly as before. Run `pytest tests/test_gridcsv.py` (and the full suite) before calling it done.
 
+    **STATUS: IMPLEMENTED (commit `5eac0a3`) and verified against Alex's real file.** Alex supplied an actual reproduction file, `sprinkler-simulator-yard-grid-2026-07-20.csv` (95 wide x 168 tall, one `d1` dead space running the full perimeter border plus corridors into an interior house cutout, with `y1`-`y7` as separate lawn zones enclosed inside it). Re-run through the Python twin after the fix landed: `parseGridCsv`/`parse_grid_csv` now returns 7 `yardZones` and exactly 1 `deadSpaces` entry, and that one dead space carries **3 holes** (its enclosed interior regions) — confirming the multi-hole case (not just a single hole) works correctly. `pytest tests/` is 78/78 green. Still worth a manual browser pass per the task's own verification checklist (interior renders as turf, coverage/usage reflect it, sq-ft subtracts the holes, clicking the interior doesn't select the dead space) since that wasn't done from this chat.
+
 ## 11. Phase 11 Addendum — 7-day outlook rework (Kc, effective-rainfall/irrigation-need constants, combined net need, one seasonal adjustment, total runtime)
 
 **Prepared:** July 20, 2026, from Alex wanting the Forecast tab's math and layout reworked. **Code-verified against** the current tip (`991248f`); every file/line reference below was checked against that tree. This is a genuine formula change, not a display tweak: the per-zone adjustment percentage is retired in favor of one system-wide seasonal-adjustment number, and net need gains a crop coefficient and a floor at zero it didn't have before.
@@ -683,29 +685,36 @@ This "preserve the name/color across reimport" heuristic guesses that token numb
 5. ~~Efficiency~~ — REMOVED as a row (forecast.js:191, 222); replaced by the "Effective Rainfall %" input above the table.
 6. **Net need** — MODIFIED formula. Was `ET0 - rain*eff` (forecast.js:194, can go negative). Now: `Math.max(0, ETc - rain*effectiveRainfallPct) * irrigationNeedPct`, i.e. floor the rain-adjusted crop need at zero *before* applying the Irrigation Need % scalar. Tooltip on the row label (matching the existing `title="ET0 - rain x eff"` pattern at forecast.js:223) updates to describe the new formula.
 7. **Combined Net Need** — NEW (11.2).
-8. **Recommended seasonal adjustment** — NEW, one row for the whole system, not per zone (11.3).
+8. **Weather Adj.** (short label; the concept is "recommended seasonal adjustment") — NEW, one row for the whole system, not per zone (11.3).
 9. **One row per sprinkler zone** (forecast.js:198-215) — MODIFIED: still gated on that zone's *own* schedule (`isScheduledDay(z.schedule, d.date)` unchanged), still shows minutes, but the minutes now come from the shared per-day adjustment (row 8) instead of a per-zone-computed one, and **the `(XX%)` annotation is dropped** — Alex: "you can get rid of writing the seasonal adjustment in each zone's row then since it's the same." The zone-label tooltip (`baseTip`, forecast.js:201) currently describes the zone's own baseline/cycles, which no longer feeds the displayed minutes at all (baseline math is retired from this calc entirely, 11.3); rewrite it to describe what's now actually relevant — base run time and the zone's Effective Watering % — rather than leaving a tooltip that references a number no longer in the chain.
 10. **Total zones runtime (min)** — NEW, bottom row: for each day, the sum of every zone's minutes that day (0 for zones not watering that day).
 
 ### 11.2 Combined Net Need: grouping and the "nice touch"
 
-Group the 7 visible days by system watering-day (decision a): walk `days` from index 1, and every time `isSystemDay(days[i].date)` is true, close the current group at `i-1` and open a new one at `i` — this always yields a group starting at index 0 even if day 0 isn't itself a watering day (a leftover tail from a watering day before the visible window), and a final group running to day 6 even with no further watering day inside the window. Each day belongs to exactly one group.
+**Errata (found in testing, before this was ever implemented): the original grouping rule below was wrong for the common case where "today" isn't itself a watering day.** With odd/even watering and today an even (non-watering) day, the original rule ("the first group always starts at index 0, even if day 0 isn't a watering day") merged today into a group and showed a Combined Net Need / Weather Adj. value for it — but the per-zone rows correctly show "no watering" for today, and Combined Net Need / Weather Adj. must agree with that: **a day with no system watering upcoming from itself doesn't get a combined value at all.** The fix: a group only ever starts *at* a system watering day. Any leading non-watering day(s) before the first watering day inside the visible window get their own solo "no watering" cell each — exactly like a zone row's off-day cell — never merged with anything.
 
 ```js
 const isSystemDay = (date) => state.sprinklerZones.some((z) => isScheduledDay(z.schedule, date));
-const groups = [];
-let gs = 0;
-for (let i = 1; i < days.length; i++) {
-  if (isSystemDay(days[i].date)) { groups.push({ start: gs, end: i - 1 }); gs = i; }
+const groups = []; // { start, end, leadIn: bool } - leadIn groups are always a single day, "no watering"
+let i = 0;
+while (i < days.length) {
+  if (isSystemDay(days[i].date)) {
+    let j = i + 1;
+    while (j < days.length && !isSystemDay(days[j].date)) j++;
+    groups.push({ start: i, end: j - 1, leadIn: false });
+    i = j;
+  } else {
+    groups.push({ start: i, end: i, leadIn: true }); // no watering day reaches this day
+    i++;
+  }
 }
-groups.push({ start: gs, end: days.length - 1 });
 ```
 
-Combined net need for a group is the sum of that group's per-day Net Need values (11.1 row 6); if any day in the group has a null Net Need (missing forecast data), the whole group's combined cell shows "-" rather than guessing.
+Combined net need for a non-lead-in group is the sum of that group's per-day Net Need values (11.1 row 6); if any day in the group has a null Net Need (missing forecast data), the whole group's combined cell shows "-" rather than guessing. A `leadIn` group's cell always reads "no watering" (styled like a zone row's off-day cell, `cell-muted`, forecast.js:204), regardless of forecast data — it never has a combined value to show.
 
-**The "nice interface touch" Alex asked for: render the Combined Net Need row (and the Recommended Seasonal Adjustment row, 11.3, which shares the same grouping) as one `<td colspan="N">` per group** instead of repeating the same number under every day column — a single cell physically spanning the days it covers is a direct, literal visualization of "these are combined," with no extra UI machinery needed. Put the covered date range in a `title` tooltip on that cell (e.g. `"Jul 11 - Jul 12"`) for the exact dates. Apply the existing day 5-7 de-emphasis (`dim`, forecast.js:181) to a group's cell only when the group's `start >= 4` — a group straddling the day-4 boundary is left un-dimmed, since part of it is still higher-confidence data.
+**The "nice interface touch" Alex asked for: render the Combined Net Need row (and the Weather Adj. row, 11.3, which shares the same grouping) as one `<td colspan="N">` per *non-lead-in* group** instead of repeating the same number under every day column — a single cell physically spanning the days it covers is a direct, literal visualization of "these are combined," with no extra UI machinery needed. `leadIn` groups are always width 1 (colspan 1), since by definition they're a single unmerged day. Put the covered date range in a `title` tooltip on a non-lead-in cell (e.g. `"Jul 11 - Jul 12"`) for the exact dates. Apply the existing day 5-7 de-emphasis (`dim`, forecast.js:181) to a group's cell only when the group's `start >= 4` — a group straddling the day-4 boundary is left un-dimmed, since part of it is still higher-confidence data.
 
-### 11.3 Recommended Seasonal Adjustment: one system-wide number per group
+### 11.3 Weather Adj.: one system-wide number per group, uncapped
 
 This is the number that replaces every zone's individual adjustment. Its denominator is a single scalar, computed once per render (not per day) from the *current coverage model*, reusing exactly what `renderZoneSummary` already computes per zone (app.js:920-928: `st.avg` from `statsOverCells(data.zoneGrids[z.id], data.cell, notDead)` is already "avg in/cycle" — Alex's "avg in/wk ÷ cycles/week" arrives at the same number by construction, so this reuses it directly rather than re-deriving through weekly totals):
 
@@ -726,9 +735,9 @@ function avgEffectiveWateringPerCycle(state) {
 
 Requires `forecast.js` to import `computeCoverage` and `statsOverCells` from `coverage.js` (new dependency; safe, one-directional — `coverage.js` imports only `state.js`/`schedule.js`, never `forecast.js`).
 
-Per group: `raw = combinedNetNeed(group) / avgEffectiveWateringPerCycle` (only if the combined value isn't null and the denominator is `> 0`; otherwise the cell reads "-", same as today's `baseline <= 0` guard at forecast.js:205). `adj = clamp(Math.round(raw * 10) / 10, 0, 1.5)` — same rounding/clamping convention as today (forecast.js:207), just computed once per group instead of once per zone per day. Display `${Math.round(adj*100)}%`, with the existing ▲-over-cap flag/tooltip (forecast.js:209-212) moved here (it no longer makes sense per-zone since the ratio itself is no longer per-zone).
+For each non-`leadIn` group: `raw = combinedNetNeed(group) / avgEffectiveWateringPerCycle` (only if the combined value isn't null and the denominator is `> 0`; otherwise the cell reads "-", same as today's `baseline <= 0` guard at forecast.js:205). **Per Alex: no upper cap.** `adj = Math.max(0, Math.round(raw * 10) / 10)` — round to the nearest 10% as before (forecast.js:207 originally also clamped to `1.5`/150%; that upper clamp and its ▲-over-cap flag/tooltip, forecast.js:209-212, are both **removed**, not just relocated — a system with unusually high need should show its true adjustment and true run time, since a 150% ceiling was specific to Alex's own system, not a general limit. The floor at 0% stays: a negative adjustment has no physical meaning, though in practice `raw` is already `>= 0` here since Net Need itself is floored at zero (11.1 row 6), so this floor is just a defensive belt-and-suspenders, not something expected to trigger.). Display `${Math.round(adj*100)}%` with no cap-related flag at all — a `leadIn` group shows "no watering" here too, same as its Combined Net Need cell.
 
-Each zone row's minutes for a day in group `g`: `Math.round(z.runTimeMin * groupAdj[g].adj)` on that zone's own scheduled days, "no watering" otherwise (unchanged gating) — precompute a `zoneDayMinutes[zoneIndex][dayIndex]` matrix once and reuse it for both the zone rows and the Total Zones Runtime row (11.1 row 10), so the two never disagree on rounding.
+Each zone row's minutes for a day in group `g`: `Math.round(z.runTimeMin * groupAdj[g].adj)` on that zone's own scheduled days ("no watering" otherwise, unchanged gating, and naturally also whatever `groupAdj` says for a `leadIn` day, which is moot since the zone doesn't water that day anyway) — precompute a `zoneDayMinutes[zoneIndex][dayIndex]` matrix once and reuse it for both the zone rows and the Total Zones Runtime row (11.1 row 10), so the two never disagree on rounding. Since there is no cap, a zone's minutes on a high-need day can now exceed `1.5 x runTimeMin` — that is the intended, literal behavior Alex asked for.
 
 ### 11.4 Data model changes (`state.js`)
 
@@ -741,21 +750,81 @@ Each zone row's minutes for a day in group `g`: `Math.round(z.runTimeMin * group
 
 ### 11.5 UI changes
 
-- **`index.html` forecast tab** (lines 237-251): rename the `#runoffEff` input to `#effRainPct` (label "Effective rainfall (%)", default 60), add a sibling `#irrigNeedPct` input ("Irrigation need (%)", default 100) in the same `.field-row` (line 241-245). Below that, add a "Crop coefficient (Kc) by month" block: a hint line explaining `ETc = ET0 × Kc` and that it's looked up by the calendar month of each forecast day, then a `.field-row` of 12 small `.field` inputs (`#kc1`..`#kc12`, labeled Jan..Dec, `type="number" step="0.01" min="0" max="2"`) — reuse the existing `.field-row`/`.field` classes (already proven to wrap acceptably with 3 fields on this same tab); add CSS only if it doesn't wrap cleanly at 12.
+- **`index.html` forecast tab** (lines 237-251): rename the `#runoffEff` input to `#effRainPct` (label "Effective rainfall (%)", default 60), add a sibling `#irrigNeedPct` input ("Irrigation need (%)", default 100) in the same `.field-row` (line 241-245).
+- **Kc block: collapsed by default, one compact row, not 12 stacked fields.** Per Alex ("most people won't touch that" / "get all the months onto one line... nice consolidated/editable table"): wrap it in a plain `<details id="kcSection">` (no `open` attribute, so it starts collapsed — unlike `headsListSection`'s narrow-screen-only collapse at index.html:128, this one is always collapsed by default regardless of viewport) with `<summary>Crop coefficient (Kc) by month (advanced)</summary>`. Inside: a one-line hint (`ETc = ET0 × Kc`, looked up by each forecast day's calendar month), then a small `<table id="kcTable">` — header row of month abbreviations (Jan..Dec), one body row of 12 `<input type="number" id="kc1"..."kc12" step="0.01" min="0" max="2" style="width:56px;">` cells. Wrap it in `.table-wrap` (the same overflow-scroll container `#zoneTable`/`#headsTable` already use) so on a narrow screen it scrolls horizontally as one compact strip instead of wrapping awkwardly across lines — this is what actually delivers "all the months on one line."
 - **`index.html` Zones table** (lines 63-68): add a `<th>Eff. watering %</th>` column (placed after "Supply GPM", before "Schedule").
 - **`app.js` `renderZoneTable`** (lines 101-147): add the matching `<td><input type="number" data-f="effectiveWateringPct" value="${z.effectiveWateringPct}" min="0" max="100" step="5" style="width:70px;"></td>` in the row template (lines 111-120), positioned to match the new header. The existing generic input handler (lines 121-130) already does `z[f] = +inp.value || 0` for any unrecognized `data-f`, so `effectiveWateringPct` needs no special-case wiring.
 - **`forecast.js` form binding** (`bindForecastForm`/`bindForecastFormValuesOnly`, lines 26-38): rename `runoffEff` references to `effRainPct`; add `irrigNeedPct` (same `onChange`/`setVal` pattern, forecast.js:30/37); add 12 `onChange`/`setVal` pairs for `kc1`..`kc12`, each writing `getState().forecast.kc[N] = +v` and re-rendering if `lastForecast` is set (matching the existing `runoffEff` handler's `if (lastForecast) renderForecast()` at forecast.js:30).
-- **`forecastNote`** (forecast.js:227-230): rewrite to describe the new rows — Kc/ETc, the floor-at-zero + Irrigation Need % in Net Need, what a Combined Net Need group means and how to read the merged cells, that the Recommended Seasonal Adjustment is one number for the whole system (not per zone) with the same 10%-step/0-150% clamp and ▲ over-cap flag as before, and that zone rows now show minutes only.
+- **`forecastNote`** (forecast.js:227-230): rewrite to describe the new rows — Kc/ETc, the floor-at-zero + Irrigation Need % in Net Need, what a Combined Net Need group means (including that a day before the first upcoming watering day shows "no watering," not a merged value), that Weather Adj. is one number for the whole system (not per zone), rounded to the nearest 10% with **no upper cap** (removed per Alex - different systems have different limits, and the true number/run time is more useful than a silently-capped one), and that zone rows now show minutes only.
 
 ### 11.6 Tests
 
-`tests/test_forecast_math.py`'s `TestHargreavesET0` and `TestBaselineDailyNeed` classes are untouched (ET0 math and the cycles-per-week concept aren't changing). `TestAdjustmentPct` and its `adjustment_pct` helper (lines 49-63, 107-141) pin the **old, now-retired** per-zone formula — notably `test_rain_fully_covers_need_suggests_skip` asserts `raw < 0` (line 112), which is no longer reachable once Net Need is floored at zero. Replace `adjustment_pct` with twins of the new pure functions (`etc_in`, `net_need_in` with the floor + Irrigation Need % scalar, `combined_net_need` over an index range, `seasonal_adjustment` from combined/avg-effective-watering), and rewrite `TestAdjustmentPct`'s cases against the new formulas (skip-on-rain now asserts the floored value is exactly `0`, not negative; add a case exercising the floor itself — heavy rain producing negative `ETc - effRain` reads as `0`, not negative). Add a small `TestCombinedNetNeed`/grouping test using the union-of-schedules rule (decision a) with two zones on different schedules, confirming the grouping matches neither zone's schedule alone.
+`tests/test_forecast_math.py`'s `TestHargreavesET0` and `TestBaselineDailyNeed` classes are untouched (ET0 math and the cycles-per-week concept aren't changing). `TestAdjustmentPct` and its `adjustment_pct` helper (lines 49-63, 107-141) pin the **old, now-retired** per-zone formula — notably `test_rain_fully_covers_need_suggests_skip` asserts `raw < 0` (line 112), which is no longer reachable once Net Need is floored at zero, and `test_adjustment_clamped_at_150_percent_and_flags_over_cap` (lines 127-130) pins a cap that no longer exists. Replace `adjustment_pct` with twins of the new pure functions (`etc_in`, `net_need_in` with the floor + Irrigation Need % scalar, `combined_net_need` over an index range, `seasonal_adjustment` from combined/avg-effective-watering, uncapped), and rewrite `TestAdjustmentPct`'s cases against the new formulas (skip-on-rain now asserts the floored value is exactly `0`, not negative; drop the 150%-cap test and replace it with one confirming a very high raw ratio - e.g. 300% - passes through uncapped, only rounded to the nearest 10%). Add a `TestGrouping` class covering: (1) the union-of-schedules rule (decision a) with two zones on different schedules, confirming the grouping matches neither zone's schedule alone; (2) the lead-in fix itself - today not a watering day, tomorrow is - asserting today is its own "no watering" entry and is never merged into the following group.
 
 ### 11.7 Ordered tasks (numbering continues from task 63)
 
 64. **Data model** (11.4): update `defaultForecast`, `makeZone`, `migrateV1toV2`, `normalizeV2` in `state.js` per the exact changes above.
 65. **Forecast math** (11.1-11.3): rewrite `renderForecast` in `forecast.js` — per-day Kc/ETc/Net Need, the watering-day grouping, `avgEffectiveWateringPerCycle`, per-group combined net need and seasonal adjustment, the `zoneDayMinutes` matrix, and the new Total Zones Runtime row. Import `computeCoverage`/`statsOverCells` from `coverage.js`.
 66. **UI** (11.5): the two-input-plus-12-Kc-input settings block, the Zones table's new column and `renderZoneTable` change, and the rewritten `forecastNote`/zone-label tooltip copy.
-67. **Tests** (11.6): update `tests/test_forecast_math.py` per the above. Run `pytest` (full suite) and manually verify in the browser: fetch a real forecast, confirm Kc/ETc/Net Need read sensibly for the current month, confirm the Combined Net Need / Recommended Seasonal Adjustment cells visually merge across a multi-day gap (test with an odd/even-scheduled zone to reproduce Alex's July 11/12 example), confirm all zone rows now show the same adjustment implicitly (via identical minutes-to-runtime ratio) and the Total Zones Runtime row sums correctly, and confirm editing any of the 12 Kc inputs or either global % updates the table live.
+67. **Tests** (11.6): update `tests/test_forecast_math.py` per the above. Run `pytest` (full suite) and manually verify in the browser: fetch a real forecast, confirm Kc/ETc/Net Need read sensibly for the current month, confirm the Combined Net Need / Weather Adj. cells visually merge across a multi-day gap and correctly show "no watering" (not a merged value) on any lead-in day before the first watering day in the window (test with an odd/even-scheduled zone, checking both an odd "today" and an even "today"), confirm the Weather Adj. % is no longer capped at 150% and zone minutes can exceed `1.5 x runTimeMin` on a high-need day, confirm all zone rows now show the same adjustment implicitly (via identical minutes-to-runtime ratio) and the Total Zones Runtime row sums correctly, and confirm editing any of the 12 Kc inputs or either global % updates the table live.
 
-    **STATUS as of this writing: NOT YET IMPLEMENTED.** `gridcsv.js`/`coverage.js`/`canvas.js`/`app.js` are still byte-identical to before this section was written (verify with `git log -1 -- docs/js/coverage.js docs/js/canvas.js docs/js/app.js` if picking this up later) - a prior pass updated this PLAN.md section but never wrote the code. Alex supplied an actual reproduction file, `sprinkler-simulator-yard-grid-2026-07-20.csv` (95 wide, one `d1` dead space running the full perimeter border plus corridors into an interior house cutout, with `y1`-`y7` as separate lawn zones enclosed inside it): with the current unfixed code, importing it produces a single `d1` object whose traced outline covers the *entire* yard, silently discarding all seven interior holes. **This one file exercises multiple holes in a single component, not just one** - `traceComponent`'s hole-collection (10.7) must keep every negative-area loop found, not just the first/largest. Use this file as the concrete before/after check: after the fix, `d1` should be one dead-space object with 7 (or however many are actually enclosed) holes in its `.holes`, and each `y1`-`y7` interior region should render and mask as normal turf again, not dead space.
+### 11.8 Errata — post-implementation fixes (found in browser testing against commit `5eac0a3`)
+
+Tasks 64-67 above were already implemented in `5eac0a3` ("Grid export/import and Forecast calc/UI changes"), essentially exactly as spec'd — including the bugs/limits Alex then found by actually using it. Four fixes, all real line references against that commit:
+
+**(1) Rename "Recommended seasonal adjustment" to "Weather Adj."**
+- forecast.js:350 — the row's visible label text `Recommended seasonal adjustment` -> `Weather Adj.` (keep the existing `title` tooltip on that `<td>` for the fuller description, or shorten it too; not load-bearing either way).
+- forecast.js:358 (`forecastNote`) — "The Recommended seasonal adjustment is one number..." -> "Weather Adj. is one number...". No internal function/variable needs renaming (`seasonalAdjustmentRaw`, `avgEffectiveWateringPerCycle`, etc. are all fine as-is).
+
+**(2) Remove the 150% cap entirely — round to the nearest 10%, floor at 0%, no ceiling.** Per Alex: his own system's cap doesn't generalize, and seeing the true adjustment/run time is more useful than a silently-capped one.
+- forecast.js:285 — `const adj = raw == null ? null : clamp(Math.round(raw * 10) / 10, 0, 1.5);` -> drop the upper bound: `const adj = raw == null ? null : Math.max(0, Math.round(raw * 10) / 10);`.
+- forecast.js:297-301 (`adjRow`) — drop the `over`/▲ branch entirely (there is no cap left to exceed): just `return g.adj == null ? "-" : `${Math.round(g.adj * 100)}%`;`.
+- forecast.js:16, 21 (module header comment) — update/remove the "clamp(...,0,1.5)" and "raw adjustment above 1.5 is flagged (▲)" lines; no longer true.
+- forecast.js:358 (`forecastNote`) — drop "...clamped 0-150%, with a ▲ when the unclamped value exceeded 150%" -> "...rounded to the nearest 10%, with no upper cap."
+- **index.html:290** (About tab) is doubly stale and must be rewritten regardless of this task: it still describes the *pre-Phase-11* per-zone model verbatim ("Adjustment % = net need ÷ baseline daily need... clamped between 0% and 150%. A ▲ marks days whose unclamped need ran past 150%") — this text was never updated when Phase 11 shipped in the first place, and now the cap is being removed on top of that. Replace it with a description of the current model: Kc/ETc, Net need (floored at 0, scaled by Irrigation Need %), Combined Net Need per watering-day group, Weather Adj. = combined ÷ avg effective watering per cycle, rounded to the nearest 10%, no cap.
+- `tests/test_forecast_math.py`: `seasonal_adjustment` (lines 77-83) and its docstring drop the `clamp(...,0,1.5)` / cap language the same way as the JS twin; `TestSeasonalAdjustment.test_clamped_at_150_percent_and_flags_over_cap` (lines 180-183) is replaced with a test confirming a large raw ratio (e.g. 3.0, 300%) passes through **uncapped**, only rounded to the nearest 10%.
+
+**(3) Fix the lead-in grouping bug: a non-watering day before the first watering day in the window must show "no watering," not a combined value.** Reproduced with an odd/even schedule where "today" is an even (non-watering) day: `wateringDayGroups` (forecast.js:231-239) unconditionally starts the first group at index 0 "even if day 0 isn't itself a watering day" (its own doc comment, forecast.js:230) — so today got merged into a group and showed a real Combined Net Need / Weather Adj. value, contradicting the zone rows, which correctly read "no watering" for today (their per-zone `isScheduledDay` gating, forecast.js:309/321, was never wrong — this bug was isolated to the two shared/global rows). Fix: a group only ever starts *at* a system watering day; any day(s) before the first one in the window get their own solo, unmerged "no watering" entry.
+```js
+export function wateringDayGroups(days, isSystemDay) {
+  const groups = [];
+  let i = 0;
+  while (i < days.length) {
+    if (isSystemDay(days[i].date)) {
+      let j = i + 1;
+      while (j < days.length && !isSystemDay(days[j].date)) j++;
+      groups.push({ start: i, end: j - 1, leadIn: false });
+      i = j;
+    } else {
+      groups.push({ start: i, end: i, leadIn: true });
+      i++;
+    }
+  }
+  return groups;
+}
+```
+- forecast.js:282-287 (`groupInfo`): a `leadIn` group's `combined`/`raw`/`adj` are never displayed; either skip computing them for `leadIn` entries or just leave them (harmless, unused) — simplest is to carry `leadIn` through onto each `groupInfo` entry (`{ ...g, combined, raw, adj }` already spreads `g`, so `leadIn` rides along automatically).
+- forecast.js:290-295 (`groupRow`): when `g.leadIn`, render `<td class="cell-muted${dimCls}">no watering</td>` unconditionally (ignoring `fn(g)`) instead of the colspan/title cell — matching the zone rows' own off-day cell style (forecast.js:321) so a lead-in day reads identically everywhere on the table.
+- No change needed to `groupOfDay`/`zoneDayMinutes` (forecast.js:306-313) or the zone rows themselves — they were never wrong.
+- `tests/test_forecast_math.py`: `watering_day_groups` (lines 86-96) gets the same fix; add a `TestWateringDayGroups` (or extend `TestCombinedNetNeed`) case with today non-watering / tomorrow watering, asserting today comes back as its own solo, `leadIn` entry rather than merged forward.
+
+**(4) Kc block: collapse by default, and consolidate onto one row instead of 12 stacked fields.** Per Alex ("most people won't touch that" / "get all the months onto one line... nice consolidated/editable table"). Replace index.html:247-261 (the hint + `.field-row` of 12 `.field`s) with:
+```html
+<details id="kcSection">
+  <summary>Crop coefficient (Kc) by month (advanced)</summary>
+  <p class="hint" style="margin-top:8px; margin-bottom:6px;">Scales ET0 into crop water use (ETc = ET0 x Kc), looked up by the calendar month of each forecast day.</p>
+  <div class="table-wrap">
+    <table id="kcTable">
+      <thead><tr><th>Jan</th><th>Feb</th><th>Mar</th><th>Apr</th><th>May</th><th>Jun</th><th>Jul</th><th>Aug</th><th>Sep</th><th>Oct</th><th>Nov</th><th>Dec</th></tr></thead>
+      <tbody><tr>
+        <td><input type="number" id="kc1" step="0.01" min="0" max="2" value="1.00" style="width:56px;"></td>
+        <!-- kc2..kc11 identical shape, carrying index.html:250-260's current default values -->
+        <td><input type="number" id="kc12" step="0.01" min="0" max="2" value="1.00" style="width:56px;"></td>
+      </tr></tbody>
+    </table>
+  </div>
+</details>
+```
+No `open` attribute, so it starts collapsed regardless of viewport width (unlike `headsListSection`'s narrow-only collapse, index.html:128, which is forced open above 700px by JS — this one has no such wiring and should not gain any). `.table-wrap` (the same class `#zoneTable`/`#headsTable`/`#forecastTable` already use) gives horizontal-scroll-on-overflow, which is what actually delivers "all the months on one line" instead of wrapping across several. No `forecast.js` change needed — `kc1`..`kc12` ids and their binding (forecast.js:38-40, 49) are unchanged, only the surrounding markup moves.
+
+**Ordered task:** 68. **Implement all four 11.8 fixes** in `forecast.js`, `index.html`, and `tests/test_forecast_math.py` per the above. Run `pytest` (full suite) and manually verify: today (non-watering, odd/even test) shows "no watering" in Combined Net Need and Weather Adj., a high-need day shows an uncapped percentage and correspondingly larger zone minutes, the Kc block is collapsed on page load and expands to one horizontally-scrollable row, and the About tab's forecast description matches the current model.

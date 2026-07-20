@@ -13,12 +13,14 @@
  *   - Combined net need      = sum of a group's per-day net needs
  *   - avgEffPerCycle         = mean over zones of (avg in/cycle from coverage) *
  *                              zone.effectiveWateringPct%
- *   - seasonal adjustment    = clamp(round((combined / avgEffPerCycle)*10)/10, 0, 1.5)
- *                              ONE number per group for the whole system (not per zone)
+ *   - Weather Adj.           = max(0, round((combined / avgEffPerCycle)*10)/10)
+ *                              ONE number per group for the whole system (not per
+ *                              zone); rounded to the nearest 10%, no upper cap
  *   - zone minutes (per day) = round(zone.runTimeMin * groupAdj) on scheduled days
  *   - total runtime (per day)= sum of every zone's minutes that day
- * Combined Net Need and Seasonal Adjustment render as one colspan cell per group.
- * A raw adjustment above 1.5 is flagged (▲). Days 5-7 are de-emphasized (note 6.5).
+ * Combined Net Need and Weather Adj. render as one cell per group; a lead-in
+ * (non-watering day before the first watering day) reads "no watering". Days 5-7
+ * are de-emphasized (note 6.5).
  * ========================================================================== */
 
 import { getState, saveState, clamp, fmt, escapeHtml } from "./state.js";
@@ -225,16 +227,25 @@ export function avgEffectiveWateringPerCycle(state) {
   return perZone.reduce((s, v) => s + v, 0) / perZone.length;
 }
 
-// Group the visible days by system watering day: close a group at each day (from
-// index 1 on) that is itself a system watering day, opening a new one there. Day
-// 0 always starts a group; the final group runs to the last day (PLAN 11.2).
+// Group the visible days by system watering day (PLAN 11.2, lead-in fix 11.8):
+// a group only ever STARTS at a system watering day and runs to the day before
+// the next one. Any non-watering day(s) before the first watering day in the
+// window become their own solo `leadIn` entries, shown as "no watering" rather
+// than merged forward into a group that would display a bogus combined value.
 export function wateringDayGroups(days, isSystemDay) {
   const groups = [];
-  let gs = 0;
-  for (let i = 1; i < days.length; i++) {
-    if (isSystemDay(days[i].date)) { groups.push({ start: gs, end: i - 1 }); gs = i; }
+  let i = 0;
+  while (i < days.length) {
+    if (isSystemDay(days[i].date)) {
+      let j = i + 1;
+      while (j < days.length && !isSystemDay(days[j].date)) j++;
+      groups.push({ start: i, end: j - 1, leadIn: false });
+      i = j;
+    } else {
+      groups.push({ start: i, end: i, leadIn: true });
+      i++;
+    }
   }
-  groups.push({ start: gs, end: days.length - 1 });
   return groups;
 }
 
@@ -278,27 +289,27 @@ export function renderForecast() {
   const groups = wateringDayGroups(days, isSystemDay);
   const avgEff = avgEffectiveWateringPerCycle(state);
 
-  // Per-group combined net need + one system seasonal adjustment.
+  // Per-group combined net need + one system weather adjustment. Rounded to the
+  // nearest 10% and floored at 0%, with NO upper cap (11.8 fix 2).
   const groupInfo = groups.map((g) => {
     const combined = combinedNetNeed(netByDay, g.start, g.end);
     const raw = seasonalAdjustmentRaw(combined, avgEff);
-    const adj = raw == null ? null : clamp(Math.round(raw * 10) / 10, 0, 1.5);
+    const adj = raw == null ? null : Math.max(0, Math.round(raw * 10) / 10);
     return { ...g, combined, raw, adj };
   });
 
-  // One colspan cell per group, spanning the days it covers.
+  // One cell per group. A lead-in day (non-watering day before the first
+  // watering day in the window) reads "no watering", matching the zone rows;
+  // otherwise a colspan cell spans the days the group covers.
   const groupRow = (fn) => groupInfo.map((g) => {
+    const dimCls = g.start >= 4 ? " dim" : "";
+    if (g.leadIn) return `<td class="cell-muted${dimCls}">no watering</td>`;
     const span = g.end - g.start + 1;
-    const dimCls = g.start >= 4 ? " class=\"dim\"" : "";
     const title = ` title="${shortDate(days[g.start].date)} - ${shortDate(days[g.end].date)}"`;
-    return `<td colspan="${span}"${dimCls}${title}>${fn(g)}</td>`;
+    return `<td colspan="${span}"${dimCls ? ` class="dim"` : ""}${title}>${fn(g)}</td>`;
   }).join("");
   const combinedRow = groupRow((g) => g.combined == null ? "-" : fmt(g.combined, 2) + '"');
-  const adjRow = groupRow((g) => {
-    if (g.adj == null) return "-";
-    const over = g.raw > 1.5;
-    return `${Math.round(g.adj * 100)}%${over ? ` ▲` : ""}`;
-  });
+  const adjRow = groupRow((g) => g.adj == null ? "-" : `${Math.round(g.adj * 100)}%`);
 
   // Minutes matrix: computed once, reused by the zone rows and the total row so
   // rounding never disagrees. null = not watering that day; number = minutes
@@ -347,7 +358,7 @@ export function renderForecast() {
       <tr><td title="Crop water use = ET0 x Kc">ETc</td>${etcRow}</tr>
       <tr><td title="max(0, ETc - rain x effective-rainfall%) x irrigation-need%">Net need</td>${netRow}</tr>
       <tr><td title="Sum of net need across each watering-day group">Combined net need</td>${combinedRow}</tr>
-      <tr><td title="One system-wide adjustment per group = combined net need / avg effective watering per cycle">Recommended seasonal adjustment</td>${adjRow}</tr>
+      <tr><td title="One system-wide adjustment per group = combined net need / avg effective watering per cycle">Weather Adj.</td>${adjRow}</tr>
       ${zoneRows}
       <tr><td>Total zones runtime (min)</td>${totalRow}</tr>
     </tbody>`;
@@ -355,5 +366,5 @@ export function renderForecast() {
   const failNote = lastForecast.failed ? "The NWS forecast couldn't be fetched, so rain and ET0 show as unknown; the schedules and groupings still display. " : "";
   document.getElementById("forecastNote").textContent =
     `${failNote}Kc scales ET0 into crop water use (ETc = ET0 x Kc), looked up by each day's calendar month. Net need floors the rain-adjusted crop need at zero, then scales by the Irrigation Need %. ` +
-    "Combined net need sums each watering-day group (a group runs between days on which any zone waters); the merged cell spans those days. The Recommended seasonal adjustment is one number for the whole system, not per zone: it is rounded to 10% and clamped 0-150%, with a ▲ when the unclamped value exceeded 150%. Each zone row shows only its minutes (base run time x that adjustment) on its own watering days; the bottom row totals all zones' minutes per day. Days 5-7 are lower-confidence.";
+    "Combined net need sums each watering-day group (a group runs between days on which any zone waters); the merged cell spans those days, and a non-watering day before the first watering day reads \"no watering\". Weather Adj. is one number for the whole system, not per zone: it is rounded to the nearest 10%, with no upper cap. Each zone row shows only its minutes (base run time x that adjustment) on its own watering days; the bottom row totals all zones' minutes per day. Days 5-7 are lower-confidence.";
 }

@@ -75,24 +75,33 @@ def combined_net_need(day_needs, start, end):
 
 
 def seasonal_adjustment(combined, avg_eff_per_cycle):
-    """One system adjustment for a group. Returns (shown, raw); (None, None) when
-    it can't be computed. shown = clamp(round(raw*10)/10, 0, 1.5)."""
+    """One system Weather Adj. for a group. Returns (shown, raw); (None, None)
+    when it can't be computed. shown = max(0, round(raw*10)/10) - rounded to the
+    nearest 10%, floored at 0%, NO upper cap (11.8 fix 2)."""
     if combined is None or not (avg_eff_per_cycle > 0):
         return None, None
     raw = combined / avg_eff_per_cycle
-    return clamp(round(raw * 10) / 10, 0, 1.5), raw
+    return max(0.0, round(raw * 10) / 10), raw
 
 
 def watering_day_groups(dates, is_system_day):
-    """Group visible days by system watering day (decision a). Twin of
-    forecast.js wateringDayGroups. Returns list of (start, end) index pairs."""
+    """Group visible days by system watering day (decision a; 11.8 lead-in fix).
+    Twin of forecast.js wateringDayGroups. A group only STARTS at a system
+    watering day; any non-watering day before the first one is its own solo
+    lead-in entry. Returns list of (start, end, lead_in) tuples."""
     groups = []
-    gs = 0
-    for i in range(1, len(dates)):
+    i = 0
+    n = len(dates)
+    while i < n:
         if is_system_day(dates[i]):
-            groups.append((gs, i - 1))
-            gs = i
-    groups.append((gs, len(dates) - 1))
+            j = i + 1
+            while j < n and not is_system_day(dates[j]):
+                j += 1
+            groups.append((i, j - 1, False))
+            i = j
+        else:
+            groups.append((i, i, True))
+            i += 1
     return groups
 
 
@@ -177,10 +186,14 @@ class TestSeasonalAdjustment:
         assert raw == pytest.approx(1.13)
         assert shown == pytest.approx(1.1)
 
-    def test_clamped_at_150_percent_and_flags_over_cap(self):
-        shown, raw = seasonal_adjustment(1.0, 0.1)
-        assert shown == pytest.approx(1.5)
-        assert raw > 1.5  # over-cap: the UI marks the group with a ▲
+    def test_no_upper_cap_only_rounded_to_ten_percent(self):
+        # 11.8 fix 2: a very high need passes through uncapped (300%), not 150%.
+        shown, raw = seasonal_adjustment(3.0, 1.0)
+        assert raw == pytest.approx(3.0)
+        assert shown == pytest.approx(3.0)
+        # Rounding to the nearest 10% still applies: 2.37 -> 2.4.
+        shown2, _ = seasonal_adjustment(2.37, 1.0)
+        assert shown2 == pytest.approx(2.4)
 
     def test_none_when_no_denominator_or_no_combined(self):
         assert seasonal_adjustment(0.3, 0) == (None, None)
@@ -193,24 +206,40 @@ class TestCombinedNetNeed:
         assert combined_net_need(needs, 0, 2) == pytest.approx(0.6)
         assert combined_net_need(needs, 2, 4) is None  # a None day poisons the group
 
+
+class TestWateringDayGroups:
     def test_grouping_is_union_of_schedules_not_either_alone(self):
         import datetime
         # A week starting Monday. Zone A waters Wednesdays, Zone B waters Fridays.
         monday = datetime.date(2026, 7, 20)  # a Monday
         dates = [monday + datetime.timedelta(days=i) for i in range(7)]
-        zone_a = {"daysOfWeek": [2]}  # Wed (Mon=0)
-        zone_b = {"daysOfWeek": [4]}  # Fri
 
-        def sched(z):
-            return lambda d: d.weekday() in z["daysOfWeek"]
+        def sched(days):
+            return lambda d: d.weekday() in days
 
-        is_a, is_b = sched(zone_a), sched(zone_b)
+        is_a, is_b = sched([2]), sched([4])  # Wed, Fri (Mon=0)
         is_system = lambda d: is_a(d) or is_b(d)  # decision a: any zone
 
         union = watering_day_groups(dates, is_system)
-        assert union == [(0, 1), (2, 3), (4, 6)]
+        # Mon/Tue are lead-ins; groups start at Wed and Fri.
+        assert union == [(0, 0, True), (1, 1, True), (2, 3, False), (4, 6, False)]
         # The union grouping matches NEITHER zone's own schedule grouping.
-        assert watering_day_groups(dates, is_a) == [(0, 1), (2, 6)]
-        assert watering_day_groups(dates, is_b) == [(0, 3), (4, 6)]
+        assert watering_day_groups(dates, is_a) == [(0, 0, True), (1, 1, True), (2, 6, False)]
+        assert watering_day_groups(dates, is_b) == [(0, 0, True), (1, 1, True), (2, 2, True), (3, 3, True), (4, 6, False)]
         assert union != watering_day_groups(dates, is_a)
         assert union != watering_day_groups(dates, is_b)
+
+    def test_lead_in_day_is_solo_not_merged_forward(self):
+        # 11.8 fix 3: today (index 0) is non-watering, tomorrow (1) waters. Today
+        # must be its own solo lead-in entry, never merged into the next group.
+        dates = list(range(5))
+        is_system = lambda d: d == 1
+        groups = watering_day_groups(dates, is_system)
+        assert groups[0] == (0, 0, True)    # today: solo lead-in
+        assert groups[1] == (1, 4, False)   # watering group starts AT tomorrow
+        assert groups == [(0, 0, True), (1, 4, False)]
+
+    def test_first_day_watering_has_no_lead_in(self):
+        dates = list(range(4))
+        is_system = lambda d: d in (0, 2)
+        assert watering_day_groups(dates, is_system) == [(0, 1, False), (2, 3, False)]

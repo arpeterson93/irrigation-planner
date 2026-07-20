@@ -244,21 +244,29 @@
         <div class="field"><label>Effective rainfall (%)</label><input type="number" id="effRainPct" min="0" max="100" step="5" value="60"></div>
         <div class="field"><label>Irrigation need (%)</label><input type="number" id="irrigNeedPct" min="0" max="200" step="5" value="100"></div>
       </div>
-      <p class="hint" style="margin-bottom:6px;">Crop coefficient (Kc) by month: scales ET₀ into crop water use (ETc = ET₀ × Kc), looked up by the calendar month of each forecast day.</p>
-      <div class="field-row">
-        <div class="field"><label>Jan</label><input type="number" id="kc1" step="0.01" min="0" max="2" value="1.00"></div>
-        <div class="field"><label>Feb</label><input type="number" id="kc2" step="0.01" min="0" max="2" value="1.00"></div>
-        <div class="field"><label>Mar</label><input type="number" id="kc3" step="0.01" min="0" max="2" value="1.00"></div>
-        <div class="field"><label>Apr</label><input type="number" id="kc4" step="0.01" min="0" max="2" value="1.04"></div>
-        <div class="field"><label>May</label><input type="number" id="kc5" step="0.01" min="0" max="2" value="0.95"></div>
-        <div class="field"><label>Jun</label><input type="number" id="kc6" step="0.01" min="0" max="2" value="0.88"></div>
-        <div class="field"><label>Jul</label><input type="number" id="kc7" step="0.01" min="0" max="2" value="0.94"></div>
-        <div class="field"><label>Aug</label><input type="number" id="kc8" step="0.01" min="0" max="2" value="0.86"></div>
-        <div class="field"><label>Sep</label><input type="number" id="kc9" step="0.01" min="0" max="2" value="0.74"></div>
-        <div class="field"><label>Oct</label><input type="number" id="kc10" step="0.01" min="0" max="2" value="0.75"></div>
-        <div class="field"><label>Nov</label><input type="number" id="kc11" step="0.01" min="0" max="2" value="1.00"></div>
-        <div class="field"><label>Dec</label><input type="number" id="kc12" step="0.01" min="0" max="2" value="1.00"></div>
-      </div>
+      <details id="kcSection">
+        <summary>Crop coefficient (Kc) by month (advanced)</summary>
+        <p class="hint" style="margin-top:8px; margin-bottom:6px;">Scales ET₀ into crop water use (ETc = ET₀ × Kc), looked up by the calendar month of each forecast day.</p>
+        <div class="table-wrap">
+          <table id="kcTable">
+            <thead><tr><th>Jan</th><th>Feb</th><th>Mar</th><th>Apr</th><th>May</th><th>Jun</th><th>Jul</th><th>Aug</th><th>Sep</th><th>Oct</th><th>Nov</th><th>Dec</th></tr></thead>
+            <tbody><tr>
+              <td><input type="number" id="kc1" step="0.01" min="0" max="2" value="1.00" style="width:56px;"></td>
+              <td><input type="number" id="kc2" step="0.01" min="0" max="2" value="1.00" style="width:56px;"></td>
+              <td><input type="number" id="kc3" step="0.01" min="0" max="2" value="1.00" style="width:56px;"></td>
+              <td><input type="number" id="kc4" step="0.01" min="0" max="2" value="1.04" style="width:56px;"></td>
+              <td><input type="number" id="kc5" step="0.01" min="0" max="2" value="0.95" style="width:56px;"></td>
+              <td><input type="number" id="kc6" step="0.01" min="0" max="2" value="0.88" style="width:56px;"></td>
+              <td><input type="number" id="kc7" step="0.01" min="0" max="2" value="0.94" style="width:56px;"></td>
+              <td><input type="number" id="kc8" step="0.01" min="0" max="2" value="0.86" style="width:56px;"></td>
+              <td><input type="number" id="kc9" step="0.01" min="0" max="2" value="0.74" style="width:56px;"></td>
+              <td><input type="number" id="kc10" step="0.01" min="0" max="2" value="0.75" style="width:56px;"></td>
+              <td><input type="number" id="kc11" step="0.01" min="0" max="2" value="1.00" style="width:56px;"></td>
+              <td><input type="number" id="kc12" step="0.01" min="0" max="2" value="1.00" style="width:56px;"></td>
+            </tr></tbody>
+          </table>
+        </div>
+      </details>
       <div class="toolbar" style="margin-bottom:0; align-items:center;">
         <button class="btn-light btn-sm" id="btnGeolocate">📍 Use my location</button>
         <button class="btn-primary" id="btnFetchForecast">Fetch 7-day forecast</button>
@@ -286,8 +294,8 @@
       <p class="hint">For every grid cell, we check which heads reach it (distance ≤ radius, and bearing to the cell falls within the head's arc). Each contributing head adds its precipitation rate; multiplying by that head's zone run time gives inches applied in one cycle. A cell's total is the sum across all zones' single cycle. Depth is modeled as uniform across each head's sector, an average rate rather than a measured distribution curve.</p>
       <h3>Forecast ET₀ estimate</h3>
       <p class="hint">Reference evapotranspiration is estimated with the Hargreaves-Samani equation using your latitude and the NWS-forecasted daily high/low temperature, a widely used simplified method when a dedicated ET station isn't available. It's an estimate, not a substitute for a local CIMIS/AgriMet reading if you have access to one; use the override field if so.</p>
-      <h3>Seasonal adjustment</h3>
-      <p class="hint">Net water need = ET₀ minus (forecasted rain × runoff efficiency). Adjustment % = net need ÷ baseline daily need. Each zone's suggested run time = its configured run time × adjustment %, rounded to the nearest 10% and clamped between 0% and 150%. A ▲ marks days whose unclamped need ran past 150% (watering was capped).</p>
+      <h3>Weather adjustment</h3>
+      <p class="hint">Crop water use ETc = ET₀ × Kc (a per-month crop coefficient). Net need = max(0, ETc − forecasted rain × effective-rainfall %) × irrigation-need %, so it never goes negative on a wet day. Days are grouped by watering day (a group runs from one day any zone waters up to the day before the next); Combined Net Need is the sum over a group. Weather Adj. = combined net need ÷ average effective watering applied per cycle (from the coverage model, scaled by each zone's effective-watering %), one number for the whole system, rounded to the nearest 10% with no upper cap. Each zone's run time on its watering days = its configured run time × that adjustment.</p>
       <h3>Your data</h3>
       <p class="hint">Everything you type is saved automatically in this browser (localStorage). That happens whether or not Sync is on. Sync (top right, off by default) is optional: turn it on and your yard config also gets saved to your own Google Sheet when you save or load, so it can follow you to another device. The satellite background image is never part of that, it always stays on the device you're using. The only other place this app talks to the internet is two anonymous, keyless calls to the public weather service when you fetch a forecast. Use <b>Export JSON</b> any time to back up your yard or move it by hand, and <b>Import JSON</b> to bring it back.</p>
       <div class="header-actions" style="margin-top:4px;">
