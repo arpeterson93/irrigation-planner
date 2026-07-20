@@ -57,10 +57,11 @@ def build_grid_csv(state):
     for y in range(H, 0, -1):
         w.writerow([str(y)] + [_cell_token(x, y, state) for x in range(1, W + 1)])
     w.writerow([])
+    # 3-field legend (task 62): import parses this back for identity recovery.
     for i, z in enumerate(state.get("yardZones", [])):
-        w.writerow(["y%d" % (i + 1), z.get("name", "")])
+        w.writerow(["y%d" % (i + 1), z.get("name", ""), z.get("color", "")])
     for i, d in enumerate(state.get("deadSpaces", [])):
-        w.writerow(["d%d" % (i + 1), "%s (%s)" % (d.get("label", ""), d.get("kind", "other"))])
+        w.writerow(["d%d" % (i + 1), d.get("label", ""), d.get("kind", "other")])
     return out.getvalue()
 
 
@@ -210,19 +211,32 @@ def parse_grid_csv(text, state):
     y_tokens = sorted(int(t[1:]) for t in masks if t[0] == "y")
     d_tokens = sorted(int(t[1:]) for t in masks if t[0] == "d")
 
+    # Parse the file's own legend footer (task 62): source of truth for identity,
+    # not the live app state. Any row past the grid whose first cell is a token
+    # contributes [field1, field2]; no legend -> empty map -> defaults below.
+    legend = {}
+    for i in range(1 + file_h, len(rows)):
+        first = str(rows[i][0] if rows[i] else "").strip()
+        if not re.fullmatch(r"[yd]\d+", first, re.IGNORECASE):
+            continue
+        token = first[0].lower() + str(int(first[1:]))
+        f1 = str(rows[i][1] if len(rows[i]) > 1 else "").strip()
+        f2 = str(rows[i][2] if len(rows[i]) > 2 else "").strip()
+        legend[token] = [f1, f2]
+
     yard_zones = []
     for n in y_tokens:
-        existing = (state.get("yardZones") or [])[n - 1] if n - 1 < len(state.get("yardZones") or []) else None
-        name = existing["name"] if existing else "Area %d" % n
-        color = existing["color"] if (existing and existing.get("color")) else AREA_PALETTE[(n - 1) % len(AREA_PALETTE)]
+        entry = legend.get("y%d" % n)
+        name = entry[0] if (entry and entry[0]) else "Area %d" % n
+        color = entry[1] if (entry and entry[1]) else AREA_PALETTE[(n - 1) % len(AREA_PALETTE)]
         for comp in _connected_components(masks["y%d" % n]):
             yard_zones.append({"name": name, "color": color, "polygon": _trace_component(comp)})
 
     dead_spaces = []
     for n in d_tokens:
-        existing = (state.get("deadSpaces") or [])[n - 1] if n - 1 < len(state.get("deadSpaces") or []) else None
-        label = existing["label"] if existing else "Dead space %d" % n
-        kind = (existing.get("kind") or "other") if existing else "other"
+        entry = legend.get("d%d" % n)
+        label = entry[0] if (entry and entry[0]) else "Dead space %d" % n
+        kind = entry[1] if (entry and entry[1]) else "other"
         for comp in _connected_components(masks["d%d" % n]):
             dead_spaces.append({"label": label, "kind": kind, "polygon": _trace_component(comp)})
 
@@ -334,6 +348,46 @@ class TestDecomposition:
                     present.add((xx, yy))
         expected = {(x, y) for x in (1, 2) for y in (1, 2, 3, 4)} | {(x, y) for x in (3, 4) for y in (1, 2)}
         assert present == expected
+
+
+class TestLegendIdentity:
+    def test_new_tokens_do_not_inherit_stale_state_identity(self):
+        # Task 62 / 10.5: the live state has leftover padded, duplicate-named
+        # entries at indices unrelated to the CSV's tokens (Alex's exact bug).
+        stale = [{"name": "Zone 2 copy", "color": "#123456", "polygon": rect(0, 0, 1, 1)}
+                 for _ in range(6)]
+        state = {"yard": {"widthFt": 7, "heightFt": 1}, "yardZones": stale, "deadSpaces": []}
+        # Fresh CSV: tokens y1..y7 across one row; legend names only y1 and y2.
+        header = "," + ",".join(str(x) for x in range(1, 8))
+        datarow = "1," + ",".join("y%d" % x for x in range(1, 8))
+        legend = ["", "y1,Front lawn,#4caf50", "y2,Back lawn,#2980b9"]
+        text = "\r\n".join([header, datarow] + legend) + "\r\n"
+
+        parsed = parse_grid_csv(text, state)
+        names = [z["name"] for z in parsed["yardZones"]]
+        # y1/y2 from the legend; y3..y7 get clean, independent defaults - never
+        # the stale identity sitting at those live-array indices.
+        assert names == ["Front lawn", "Back lawn", "Area 3", "Area 4", "Area 5", "Area 6", "Area 7"]
+        assert len(set(names)) == 7  # no repeats
+        assert "#123456" not in [z["color"] for z in parsed["yardZones"]]
+
+    def test_round_trip_preserves_names_colors_labels_kinds(self):
+        # The actual use case the legend exists to serve: export -> re-import the
+        # unmodified file -> identity comes back exactly.
+        state = {
+            "yard": {"widthFt": 10, "heightFt": 6},
+            "yardZones": [
+                {"name": "Front lawn", "color": "#4caf50", "polygon": rect(0, 0, 5, 6)},
+                {"name": "Side strip", "color": "#8e44ad", "polygon": rect(5, 0, 10, 3)},
+            ],
+            "deadSpaces": [
+                {"label": "Driveway", "kind": "driveway", "polygon": rect(5, 3, 10, 6)},
+            ],
+        }
+        parsed = parse_grid_csv(build_grid_csv(state), state)
+        assert [(z["name"], z["color"]) for z in parsed["yardZones"]] == [
+            ("Front lawn", "#4caf50"), ("Side strip", "#8e44ad")]
+        assert [(d["label"], d["kind"]) for d in parsed["deadSpaces"]] == [("Driveway", "driveway")]
 
 
 class TestRejections:

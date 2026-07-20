@@ -70,14 +70,16 @@ export function buildGridCsv(state) {
     lines.push(row.join(","));
   }
 
-  // Legend footer (export only; import ignores everything past row H+1). One
-  // blank separator row, then one line per entry.
+  // Legend footer. One blank separator row, then one line per entry. Import
+  // parses this back to recover each token's name/color/label/kind (task 62),
+  // so it is the source of truth for identity across a round-trip - never the
+  // live in-memory zones array. Three fields per row, each quoted independently.
   lines.push("");
   (state.yardZones || []).forEach((z, i) => {
-    lines.push("y" + (i + 1) + "," + csvField(z.name || ""));
+    lines.push(["y" + (i + 1), csvField(z.name || ""), csvField(z.color || "")].join(","));
   });
   (state.deadSpaces || []).forEach((d, i) => {
-    lines.push("d" + (i + 1) + "," + csvField((d.label || "") + " (" + (d.kind || "other") + ")"));
+    lines.push(["d" + (i + 1), csvField(d.label || ""), csvField(d.kind || "other")].join(","));
   });
 
   return lines.join(EOL) + EOL;
@@ -307,15 +309,28 @@ export function parseGridCsv(text, state) {
   yTokens.sort((a, b) => a - b);
   dTokens.sort((a, b) => a - b);
 
+  // Parse the file's own legend footer (task 62) - the source of truth for each
+  // token's name/color/label/kind across a round-trip. Scanning from just past
+  // the grid (skipping the blank separator), any row whose first cell is a token
+  // contributes `[field1, field2]`; a hand-built CSV with no legend simply yields
+  // an empty map and everything falls through to defaults below.
+  const legend = new Map(); // token -> [field1, field2]
+  for (let i = 1 + fileH; i < rows.length; i++) {
+    const first = String(rows[i][0] || "").trim();
+    if (!/^[yd]\d+$/i.test(first)) continue;
+    const token = first[0].toLowerCase() + String(parseInt(first.slice(1), 10));
+    legend.set(token, [String(rows[i][1] || "").trim(), String(rows[i][2] || "").trim()]);
+  }
+
   const yardZones = [];
   for (const n of yTokens) {
     // One object per contiguous region (task 61); disjoint blocks still split.
     const comps = connectedComponents(masks.get("y" + n));
-    // Preserve the current entry's name/color for this token number when it
-    // exists (stable round-trip); default for a genuinely new number.
-    const existing = (state.yardZones || [])[n - 1];
-    const name = existing ? existing.name : "Area " + n;
-    const color = (existing && existing.color) ? existing.color : AREA_PALETTE[(n - 1) % AREA_PALETTE.length];
+    // Recover name/color from the file's legend, not the live app state; a
+    // missing legend row (or field) falls through to a per-token default.
+    const entry = legend.get("y" + n);
+    const name = (entry && entry[0]) ? entry[0] : "Area " + n;
+    const color = (entry && entry[1]) ? entry[1] : AREA_PALETTE[(n - 1) % AREA_PALETTE.length];
     for (const comp of comps) {
       yardZones.push({ id: uid("yz"), name, color, polygon: traceComponent(comp) });
     }
@@ -324,11 +339,11 @@ export function parseGridCsv(text, state) {
   const deadSpaces = [];
   for (const n of dTokens) {
     const comps = connectedComponents(masks.get("d" + n));
-    const existing = (state.deadSpaces || [])[n - 1];
-    const label = existing ? existing.label : "Dead space " + n;
-    // The grid can't express `kind`; keep the existing kind or default to
+    const entry = legend.get("d" + n);
+    const label = (entry && entry[0]) ? entry[0] : "Dead space " + n;
+    // The grid can't express `kind`; recover it from the legend or default to
     // "other" (editable afterward in the Dead spaces table).
-    const kind = existing ? (existing.kind || "other") : "other";
+    const kind = (entry && entry[1]) ? entry[1] : "other";
     for (const comp of comps) {
       deadSpaces.push({ id: uid("ds"), label, kind, polygon: traceComponent(comp) });
     }
